@@ -27,11 +27,11 @@ body {
 
 .upload-button {
   min-width: 160px;
-  border: 1px solid var(--ev-button-alt-border);
+  border: 1px solid var(--button-border);
   border-radius: 8px;
   padding: 12px 20px;
-  color: var(--ev-button-alt-text);
-  background: var(--ev-button-alt-bg);
+  color: var(--button-text);
+  background: var(--button-background);
   font: inherit;
   font-size: 15px;
   font-weight: 600;
@@ -40,13 +40,11 @@ body {
 }
 
 .upload-button:hover {
-  border-color: var(--ev-button-alt-hover-border);
-  color: var(--ev-button-alt-hover-text);
-  background: var(--ev-button-alt-hover-bg);
+  background: var(--button-background-hover);
 }
 
 .upload-button:focus-visible {
-  outline: 2px solid #8ab4f8;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 

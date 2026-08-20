@@ -1,8 +1,9 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
+export interface AppAPI {
+  selectPdf: () => Promise<string | null>
+}
 
 declare global {
   interface Window {
-    electron: ElectronAPI
-    api: unknown
+    api: AppAPI
   }
 }
