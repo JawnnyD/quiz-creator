@@ -25,10 +25,6 @@ body {
   padding: 24px;
 }
 
-.pdf-input {
-  display: none;
-}
-
 .upload-button {
   min-width: 160px;
   border: 1px solid var(--ev-button-alt-border);
