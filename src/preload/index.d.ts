@@ -1,5 +1,9 @@
+import type { DeleteLessonResult, LessonRecord } from '../shared/lessons'
+
 export interface AppAPI {
-  selectPdf: () => Promise<string | null>
+  importLessonPdf: () => Promise<LessonRecord | null>
+  listLessons: () => Promise<LessonRecord[]>
+  deleteLesson: (id: string) => Promise<DeleteLessonResult>
 }
 
 declare global {

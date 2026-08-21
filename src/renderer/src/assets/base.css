@@ -1,10 +1,19 @@
 :root {
   --color-background: #1b1b1f;
   --color-text: rgba(255, 255, 245, 0.86);
+  --color-muted: rgba(255, 255, 245, 0.58);
+  --color-border: rgba(255, 255, 245, 0.11);
+  --color-surface: #24252a;
+  --color-surface-raised: #2d2f35;
+  --color-danger: #ff8f8f;
+  --color-success: #9bd9b2;
   --button-background: #32363f;
   --button-background-hover: #414853;
   --button-border: transparent;
   --button-text: var(--color-text);
+  --danger-button-background: rgba(255, 143, 143, 0.1);
+  --danger-button-background-hover: rgba(255, 143, 143, 0.16);
+  --danger-button-border: rgba(255, 143, 143, 0.28);
   --focus-ring: #8ab4f8;
 }
 

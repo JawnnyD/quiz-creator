@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { DeleteLessonResult, LessonRecord } from '../shared/lessons'
 
 const api = {
-  selectPdf: (): Promise<string | null> => ipcRenderer.invoke('pdf:select')
+  importLessonPdf: (): Promise<LessonRecord | null> => ipcRenderer.invoke('lessons:importPdf'),
+  listLessons: (): Promise<LessonRecord[]> => ipcRenderer.invoke('lessons:list'),
+  deleteLesson: (id: string): Promise<DeleteLessonResult> =>
+    ipcRenderer.invoke('lessons:delete', id)
 }
 
 if (process.contextIsolated) {

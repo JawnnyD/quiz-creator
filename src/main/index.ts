@@ -2,6 +2,14 @@ import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { closeDatabase, initializeDatabase } from './db'
+import {
+  deleteLesson,
+  importLessonPdf,
+  listLessons,
+  type DeleteLessonResult,
+  type LessonRecord
+} from './lessons'
 
 function createWindow(): void {
   // Create the browser window.
@@ -42,6 +50,19 @@ app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
+  try {
+    initializeDatabase()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+
+    dialog.showErrorBox(
+      'Database Error',
+      `Quiz Creator could not initialize its local database.\n\n${message}`
+    )
+    app.quit()
+    return
+  }
+
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
   // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
@@ -49,7 +70,7 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ipcMain.handle('pdf:select', async (): Promise<string | null> => {
+  ipcMain.handle('lessons:importPdf', async (): Promise<LessonRecord | null> => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
       filters: [{ name: 'PDF files', extensions: ['pdf'] }]
@@ -59,7 +80,36 @@ app.whenReady().then(() => {
       return null
     }
 
-    return result.filePaths[0] ?? null
+    const selectedPdfPath = result.filePaths[0]
+
+    if (selectedPdfPath === undefined) {
+      return null
+    }
+
+    try {
+      return importLessonPdf(selectedPdfPath)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to import lesson PDF: ${message}`)
+    }
+  })
+
+  ipcMain.handle('lessons:list', (): LessonRecord[] => {
+    try {
+      return listLessons()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to load lessons: ${message}`)
+    }
+  })
+
+  ipcMain.handle('lessons:delete', (_, lessonId: string): DeleteLessonResult => {
+    try {
+      return deleteLesson(lessonId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to delete lesson: ${message}`)
+    }
   })
 
   createWindow()
@@ -78,6 +128,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', () => {
+  closeDatabase()
 })
 
 // In this file you can include the rest of your app's specific main process
