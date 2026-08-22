@@ -1,3 +1,5 @@
+export type TextExtractionStatus = 'not_started' | 'completed' | 'failed'
+
 export interface LessonRecord {
   id: string
   title: string
@@ -5,6 +7,10 @@ export interface LessonRecord {
   storedRelativePath: string
   contentHash: string
   sizeBytes: number
+  textExtractionStatus: TextExtractionStatus
+  textPageCount: number
+  textCharacterCount: number
+  textExtractionError: string | null
   createdAt: string
   updatedAt: string
 }

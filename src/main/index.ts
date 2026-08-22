@@ -87,7 +87,7 @@ app.whenReady().then(() => {
     }
 
     try {
-      return importLessonPdf(selectedPdfPath)
+      return await importLessonPdf(selectedPdfPath)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`Unable to import lesson PDF: ${message}`)

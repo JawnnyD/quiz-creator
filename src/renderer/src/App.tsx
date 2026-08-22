@@ -64,11 +64,25 @@ function App(): JSX.Element {
       const wasAlreadyImported = lessons.some((lesson) => lesson.id === importedLesson.id)
 
       setLessons((currentLessons) => upsertLesson(currentLessons, importedLesson))
-      setStatusMessage(
-        wasAlreadyImported
-          ? `"${importedLesson.title}" was already imported.`
-          : `Imported "${importedLesson.title}".`
-      )
+
+      if (importedLesson.textExtractionStatus === 'failed') {
+        setErrorMessage(
+          `${wasAlreadyImported ? 'Loaded' : 'Imported'} "${importedLesson.title}", but text extraction failed: ${importedLesson.textExtractionError ?? 'Unknown error'}`
+        )
+      } else if (
+        importedLesson.textExtractionStatus === 'completed' &&
+        importedLesson.textCharacterCount === 0
+      ) {
+        setStatusMessage(
+          `${wasAlreadyImported ? 'Loaded' : 'Imported'} "${importedLesson.title}", but no selectable text was found.`
+        )
+      } else {
+        setStatusMessage(
+          wasAlreadyImported
+            ? `"${importedLesson.title}" was already imported.`
+            : `Imported "${importedLesson.title}".`
+        )
+      }
     } catch (error) {
       setErrorMessage(getErrorMessage(error))
     } finally {
@@ -178,6 +192,10 @@ function App(): JSX.Element {
                       <dt>Imported</dt>
                       <dd>{formatDate(lesson.createdAt)}</dd>
                     </div>
+                    <div>
+                      <dt>Text</dt>
+                      <dd>{formatExtractionStatus(lesson)}</dd>
+                    </div>
                   </dl>
                   <button
                     className="delete-button"
@@ -232,6 +250,29 @@ function formatDate(value: string): string {
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(date)
+}
+
+function formatExtractionStatus(lesson: LessonRecord): string {
+  if (lesson.textExtractionStatus === 'failed') {
+    return 'Failed'
+  }
+
+  if (lesson.textExtractionStatus === 'not_started') {
+    return 'Not started'
+  }
+
+  if (lesson.textCharacterCount === 0) {
+    return 'No text'
+  }
+
+  return `${lesson.textPageCount} page${lesson.textPageCount === 1 ? '' : 's'}, ${formatCompactNumber(lesson.textCharacterCount)} chars`
+}
+
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: 1
+  }).format(value)
 }
 
 function getErrorMessage(error: unknown): string {
