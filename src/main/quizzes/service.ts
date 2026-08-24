@@ -27,13 +27,13 @@ export interface SaveQuizQuestionsInput {
   questions: SaveQuizQuestionInput[]
 }
 
-interface SaveQuizQuestionInput {
+export interface SaveQuizQuestionInput {
   prompt: string
   explanation?: string | null
   choices: SaveQuizChoiceInput[]
 }
 
-interface SaveQuizChoiceInput {
+export interface SaveQuizChoiceInput {
   choiceText: string
   isCorrect: boolean
 }

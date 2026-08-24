@@ -2,6 +2,10 @@ import type { QuizQuestion, QuizRecord, QuizResult } from '../../shared/quizzes'
 
 import { initializeDatabase } from '../db'
 import {
+  generateTemporaryQuizFromLessonTextFromDatabase,
+  type GenerateTemporaryQuizInput
+} from './generator'
+import {
   createQuizRecordFromDatabase,
   gradeQuizAnswersFromDatabase,
   listQuizzesForLessonFromDatabase,
@@ -28,6 +32,10 @@ export type {
   QuizAnswerSubmission,
   SaveQuizQuestionsInput
 } from './service'
+export type { GenerateTemporaryQuizInput } from './generator'
+export {
+  generateTemporaryQuizFromLessonTextFromDatabase
+} from './generator'
 export {
   createQuizRecordFromDatabase,
   gradeQuizAnswersFromDatabase,
@@ -65,4 +73,10 @@ export function submitQuizAttempt(
   answers: QuizAnswerSubmission[]
 ): QuizResult {
   return submitQuizAttemptFromDatabase(initializeDatabase(), quizId, answers)
+}
+
+export function generateTemporaryQuizFromLessonText(
+  input: GenerateTemporaryQuizInput
+): FullQuiz {
+  return generateTemporaryQuizFromLessonTextFromDatabase(initializeDatabase(), input)
 }
