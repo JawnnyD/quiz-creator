@@ -10,6 +10,17 @@ import {
   type DeleteLessonResult,
   type LessonRecord
 } from './lessons'
+import {
+  generateTemporaryQuizFromLessonText,
+  listQuizzesForLesson,
+  loadFullQuiz,
+  submitQuizAttempt,
+  type FullQuiz,
+  type GenerateTemporaryQuizInput,
+  type QuizAnswerSubmission,
+  type QuizRecord,
+  type QuizResult
+} from './quizzes'
 
 function createWindow(): void {
   // Create the browser window.
@@ -111,6 +122,45 @@ app.whenReady().then(() => {
       throw new Error(`Unable to delete lesson: ${message}`)
     }
   })
+
+  ipcMain.handle('quizzes:create', (_, input: GenerateTemporaryQuizInput): FullQuiz => {
+    try {
+      return generateTemporaryQuizFromLessonText(input)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to create quiz: ${message}`)
+    }
+  })
+
+  ipcMain.handle('quizzes:listForLesson', (_, lessonId: string): QuizRecord[] => {
+    try {
+      return listQuizzesForLesson(lessonId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to load quizzes: ${message}`)
+    }
+  })
+
+  ipcMain.handle('quizzes:get', (_, quizId: string): FullQuiz | null => {
+    try {
+      return loadFullQuiz(quizId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to load quiz: ${message}`)
+    }
+  })
+
+  ipcMain.handle(
+    'quizzes:submitAttempt',
+    (_, quizId: string, answers: QuizAnswerSubmission[]): QuizResult => {
+      try {
+        return submitQuizAttempt(quizId, answers)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw new Error(`Unable to submit quiz attempt: ${message}`)
+      }
+    }
+  )
 
   createWindow()
 
