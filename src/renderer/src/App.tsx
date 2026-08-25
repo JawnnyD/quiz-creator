@@ -855,6 +855,9 @@ function App(): JSX.Element {
                   <span>
                     <span className="lesson-title-text">{lesson.title}</span>
                     <span className="lesson-file-name">{lesson.originalFileName}</span>
+                    <span className="lesson-imported-date">
+                      Imported {formatDate(lesson.createdAt)}
+                    </span>
                   </span>
                 </button>
                 <button

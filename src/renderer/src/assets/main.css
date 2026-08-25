@@ -158,7 +158,8 @@ body {
 }
 
 .lesson-title-text,
-.lesson-file-name {
+.lesson-file-name,
+.lesson-imported-date {
   display: block;
 }
 
@@ -175,6 +176,13 @@ body {
   overflow-wrap: anywhere;
   color: var(--color-muted);
   font-size: 13px;
+  line-height: 1.35;
+}
+
+.lesson-imported-date {
+  margin-top: 6px;
+  color: var(--color-muted);
+  font-size: 12px;
   line-height: 1.35;
 }
 
