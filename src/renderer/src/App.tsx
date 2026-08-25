@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState, type JSX } from 'react'
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { LessonRecord } from '../../shared/lessons'
-import type { QuizRecord } from '../../shared/quizzes'
+import type { QuizRecord, QuizResult } from '../../shared/quizzes'
+
+type FullQuiz = NonNullable<Awaited<ReturnType<Window['api']['getQuiz']>>>
+type QuizAnswerSubmission = Parameters<Window['api']['submitQuizAttempt']>[1][number]
 
 function App(): JSX.Element {
   const [lessons, setLessons] = useState<LessonRecord[]>([])
@@ -14,8 +17,17 @@ function App(): JSX.Element {
   const [isCreatingQuiz, setIsCreatingQuiz] = useState(false)
   const [quizErrorMessage, setQuizErrorMessage] = useState<string | null>(null)
   const [questionCountInput, setQuestionCountInput] = useState('5')
+  const [activeQuiz, setActiveQuiz] = useState<FullQuiz | null>(null)
+  const [selectedChoiceIdsByQuestionId, setSelectedChoiceIdsByQuestionId] = useState<
+    Record<string, string>
+  >({})
+  const [quizResult, setQuizResult] = useState<QuizResult | null>(null)
+  const [isLoadingActiveQuiz, setIsLoadingActiveQuiz] = useState(false)
+  const [isSubmittingQuizAttempt, setIsSubmittingQuizAttempt] = useState(false)
+  const [quizTakingErrorMessage, setQuizTakingErrorMessage] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const quizLoadRequestIdRef = useRef(0)
 
   useEffect(() => {
     let isCanceled = false
@@ -131,6 +143,18 @@ function App(): JSX.Element {
     generateQuizUnavailableReason === null &&
     questionCountErrorMessage === null &&
     !isCreatingQuiz
+  const isQuizTakingView =
+    activeQuiz !== null || isLoadingActiveQuiz || quizTakingErrorMessage !== null
+  const answeredQuestionCount =
+    activeQuiz?.questions.filter(
+      (question) => selectedChoiceIdsByQuestionId[question.id] !== undefined
+    ).length ?? 0
+  const canSubmitQuizAttempt =
+    activeQuiz !== null &&
+    quizResult === null &&
+    !isSubmittingQuizAttempt &&
+    activeQuiz.questions.length > 0 &&
+    answeredQuestionCount === activeQuiz.questions.length
 
   const openPdfPicker = async (): Promise<void> => {
     setIsImporting(true)
@@ -150,6 +174,7 @@ function App(): JSX.Element {
       setLessons((currentLessons) => upsertLesson(currentLessons, importedLesson))
       setActiveLessonId(importedLesson.id)
       setSelectedQuizId(null)
+      resetQuizTakingState()
 
       if (importedLesson.textExtractionStatus === 'failed') {
         setErrorMessage(
@@ -207,6 +232,7 @@ function App(): JSX.Element {
   const openLessonDetail = (lessonId: string): void => {
     setActiveLessonId(lessonId)
     setQuizErrorMessage(null)
+    resetQuizTakingState()
   }
 
   const closeLessonDetail = (): void => {
@@ -215,6 +241,93 @@ function App(): JSX.Element {
     setSelectedQuizId(null)
     setIsLoadingQuizzes(false)
     setQuizErrorMessage(null)
+    resetQuizTakingState()
+  }
+
+  const openQuizTaking = async (quizId: string): Promise<void> => {
+    const requestId = quizLoadRequestIdRef.current + 1
+    quizLoadRequestIdRef.current = requestId
+
+    setSelectedQuizId(quizId)
+    setActiveQuiz(null)
+    setSelectedChoiceIdsByQuestionId({})
+    setQuizResult(null)
+    setIsLoadingActiveQuiz(true)
+    setIsSubmittingQuizAttempt(false)
+    setQuizTakingErrorMessage(null)
+    setStatusMessage(null)
+    setErrorMessage(null)
+
+    try {
+      const loadedQuiz = await window.api.getQuiz(quizId)
+
+      if (quizLoadRequestIdRef.current !== requestId) {
+        return
+      }
+
+      if (loadedQuiz === null) {
+        setQuizTakingErrorMessage('Quiz was not found.')
+        return
+      }
+
+      setActiveQuiz(loadedQuiz)
+    } catch (error) {
+      if (quizLoadRequestIdRef.current === requestId) {
+        setQuizTakingErrorMessage(getErrorMessage(error))
+      }
+    } finally {
+      if (quizLoadRequestIdRef.current === requestId) {
+        setIsLoadingActiveQuiz(false)
+      }
+    }
+  }
+
+  const closeQuizTaking = (): void => {
+    resetQuizTakingState()
+  }
+
+  const resetQuizTakingState = (): void => {
+    quizLoadRequestIdRef.current += 1
+    setActiveQuiz(null)
+    setSelectedChoiceIdsByQuestionId({})
+    setQuizResult(null)
+    setIsLoadingActiveQuiz(false)
+    setIsSubmittingQuizAttempt(false)
+    setQuizTakingErrorMessage(null)
+  }
+
+  const selectQuizChoice = (questionId: string, choiceId: string): void => {
+    if (quizResult !== null || isSubmittingQuizAttempt) {
+      return
+    }
+
+    setSelectedChoiceIdsByQuestionId((currentAnswers) => ({
+      ...currentAnswers,
+      [questionId]: choiceId
+    }))
+  }
+
+  const submitQuizAttempt = async (): Promise<void> => {
+    if (activeQuiz === null || !canSubmitQuizAttempt) {
+      return
+    }
+
+    const answers: QuizAnswerSubmission[] = activeQuiz.questions.map((question) => ({
+      questionId: question.id,
+      selectedChoiceId: selectedChoiceIdsByQuestionId[question.id]
+    }))
+
+    setIsSubmittingQuizAttempt(true)
+    setQuizTakingErrorMessage(null)
+
+    try {
+      const result = await window.api.submitQuizAttempt(activeQuiz.quiz.id, answers)
+      setQuizResult(result)
+    } catch (error) {
+      setQuizTakingErrorMessage(getErrorMessage(error))
+    } finally {
+      setIsSubmittingQuizAttempt(false)
+    }
   }
 
   const deleteLesson = async (lesson: LessonRecord): Promise<void> => {
@@ -276,9 +389,15 @@ function App(): JSX.Element {
     <main className="app">
       <section
         className="lesson-workspace"
-        aria-labelledby={activeLesson === null ? 'lessons-heading' : 'lesson-detail-heading'}
+        aria-labelledby={
+          isQuizTakingView
+            ? 'quiz-taking-heading'
+            : activeLesson === null
+              ? 'lessons-heading'
+              : 'lesson-detail-heading'
+        }
       >
-        {activeLesson === null ? (
+        {activeLesson === null && !isQuizTakingView ? (
           <header className="lesson-header">
             <div>
               <h1 id="lessons-heading">Lessons</h1>
@@ -305,6 +424,119 @@ function App(): JSX.Element {
 
         {isLoading ? (
           <p className="empty-state">Loading lessons...</p>
+        ) : isQuizTakingView ? (
+          <section className="quiz-taking" aria-labelledby="quiz-taking-heading">
+            <div className="detail-topbar">
+              <button className="back-button" type="button" onClick={closeQuizTaking}>
+                Back
+              </button>
+            </div>
+
+            <header className="quiz-taking-header">
+              <div className="detail-title-group">
+                <p className="detail-kicker">Quiz</p>
+                <h2 id="quiz-taking-heading">{activeQuiz?.quiz.title ?? 'Quiz'}</h2>
+                {activeQuiz !== null ? (
+                  <p>
+                    {activeQuiz.questions.length} question
+                    {activeQuiz.questions.length === 1 ? '' : 's'}
+                  </p>
+                ) : null}
+              </div>
+            </header>
+
+            {quizTakingErrorMessage !== null ? (
+              <p className="status-message status-message-error" role="alert">
+                {quizTakingErrorMessage}
+              </p>
+            ) : null}
+
+            {isLoadingActiveQuiz ? (
+              <p className="empty-state detail-empty-state">Loading quiz...</p>
+            ) : activeQuiz === null ? (
+              <p className="empty-state detail-empty-state">
+                Open a quiz from the lesson info screen.
+              </p>
+            ) : activeQuiz.questions.length === 0 ? (
+              <p className="empty-state detail-empty-state">This quiz has no questions.</p>
+            ) : (
+              <>
+                {quizResult !== null ? (
+                  <p className="quiz-result-summary">
+                    Score: {quizResult.attempt.correctAnswerCount} /{' '}
+                    {quizResult.attempt.totalQuestionCount}
+                  </p>
+                ) : null}
+
+                <ol className="quiz-question-list">
+                  {activeQuiz.questions.map((question, questionIndex) => {
+                    const selectedChoiceId = selectedChoiceIdsByQuestionId[question.id]
+
+                    return (
+                      <li className="quiz-question-card" key={question.id}>
+                        <h3>
+                          <span>Question {questionIndex + 1}</span>
+                          {question.prompt}
+                        </h3>
+                        <div
+                          className="quiz-choice-list"
+                          role="radiogroup"
+                          aria-label={`Answers for question ${questionIndex + 1}`}
+                        >
+                          {question.choices.map((choice) => {
+                            const isSelectedChoice = selectedChoiceId === choice.id
+
+                            return (
+                              <label
+                                className={`quiz-choice${
+                                  isSelectedChoice ? ' quiz-choice-selected' : ''
+                                }`}
+                                key={choice.id}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`quiz-question-${question.id}`}
+                                  value={choice.id}
+                                  checked={isSelectedChoice}
+                                  disabled={quizResult !== null || isSubmittingQuizAttempt}
+                                  onChange={() => {
+                                    selectQuizChoice(question.id, choice.id)
+                                  }}
+                                />
+                                <span>{choice.choiceText}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ol>
+
+                <div className="quiz-submit-bar">
+                  <p>
+                    {quizResult === null
+                      ? `${answeredQuestionCount} of ${activeQuiz.questions.length} answered`
+                      : 'Attempt submitted'}
+                  </p>
+                  <button
+                    className="upload-button submit-quiz-button"
+                    type="button"
+                    onClick={() => {
+                      void submitQuizAttempt()
+                    }}
+                    disabled={!canSubmitQuizAttempt}
+                  >
+                    {isSubmittingQuizAttempt
+                      ? 'Submitting...'
+                      : quizResult === null
+                        ? 'Submit answers'
+                        : 'Submitted'}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
         ) : activeLesson === null && lessons.length === 0 ? (
           <p className="empty-state">Import a PDF to create your first lesson.</p>
         ) : activeLesson === null ? (
@@ -463,7 +695,7 @@ function App(): JSX.Element {
                           className={`quiz-item${isSelectedQuiz ? ' quiz-item-selected' : ''}`}
                           type="button"
                           onClick={() => {
-                            setSelectedQuizId(quiz.id)
+                            void openQuizTaking(quiz.id)
                           }}
                           aria-pressed={isSelectedQuiz}
                         >
