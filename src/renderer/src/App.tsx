@@ -35,6 +35,7 @@ function App(): JSX.Element {
   const [questionCountInput, setQuestionCountInput] = useState(defaultQuestionCountInput)
   const [selectedDifficultyId, setSelectedDifficultyId] = useState<DifficultyOptionId>('easy')
   const [customDifficultyInstructions, setCustomDifficultyInstructions] = useState('')
+  const [isTutorModeEnabled, setIsTutorModeEnabled] = useState(false)
   const [activeQuiz, setActiveQuiz] = useState<FullQuiz | null>(null)
   const [selectedChoiceIdsByQuestionId, setSelectedChoiceIdsByQuestionId] = useState<
     Record<string, string>
@@ -587,6 +588,18 @@ function App(): JSX.Element {
                   </p>
                 ) : null}
               </div>
+              {activeAttemptHistoryQuizId === null ? (
+                <label className="tutor-mode-toggle">
+                  <span>Tutor mode</span>
+                  <input
+                    type="checkbox"
+                    checked={isTutorModeEnabled}
+                    onChange={(event) => {
+                      setIsTutorModeEnabled(event.currentTarget.checked)
+                    }}
+                  />
+                </label>
+              ) : null}
             </header>
 
             {quizTakingErrorMessage !== null ? (
@@ -624,13 +637,20 @@ function App(): JSX.Element {
                     )
                     const correctChoice = question.choices.find((choice) => choice.isCorrect)
                     const reviewContent = getQuestionReviewContent(question.explanation)
+                    const isTutorModeQuestionFeedbackVisible =
+                      quizResult === null && isTutorModeEnabled && selectedChoice !== undefined
+                    const isQuestionFeedbackVisible =
+                      resultAnswer !== undefined || isTutorModeQuestionFeedbackVisible
+                    const isQuestionCorrect =
+                      resultAnswer?.isCorrect ??
+                      (isTutorModeQuestionFeedbackVisible ? selectedChoice.isCorrect : false)
 
                     return (
                       <li
                         className={`quiz-question-card${
-                          resultAnswer === undefined
+                          !isQuestionFeedbackVisible
                             ? ''
-                            : resultAnswer.isCorrect
+                            : isQuestionCorrect
                               ? ' quiz-question-card-correct'
                               : ' quiz-question-card-incorrect'
                         }`}
@@ -653,10 +673,10 @@ function App(): JSX.Element {
                                 className={[
                                   'quiz-choice',
                                   isSelectedChoice ? 'quiz-choice-selected' : '',
-                                  quizResult !== null && choice.isCorrect
+                                  isQuestionFeedbackVisible && choice.isCorrect
                                     ? 'quiz-choice-correct'
                                     : '',
-                                  quizResult !== null && isSelectedChoice && !choice.isCorrect
+                                  isQuestionFeedbackVisible && isSelectedChoice && !choice.isCorrect
                                     ? 'quiz-choice-incorrect'
                                     : ''
                                 ]
@@ -679,17 +699,17 @@ function App(): JSX.Element {
                             )
                           })}
                         </div>
-                        {resultAnswer !== undefined ? (
+                        {isQuestionFeedbackVisible ? (
                           <div className="quiz-review">
                             <div className="quiz-review-header">
                               <span
                                 className={`quiz-result-badge${
-                                  resultAnswer.isCorrect
+                                  isQuestionCorrect
                                     ? ' quiz-result-badge-correct'
                                     : ' quiz-result-badge-incorrect'
                                 }`}
                               >
-                                {resultAnswer.isCorrect ? 'Correct' : 'Incorrect'}
+                                {isQuestionCorrect ? 'Correct' : 'Incorrect'}
                               </span>
                             </div>
 
@@ -726,9 +746,11 @@ function App(): JSX.Element {
                   <p>
                     {quizResult !== null && activeAttemptHistoryQuizId !== null
                       ? `Completed ${formatAttemptCompletedDate(quizResult.attempt)}`
-                      : quizResult === null
-                        ? `${answeredQuestionCount} of ${activeQuiz.questions.length} answered`
-                        : 'Attempt submitted'}
+                      : quizResult === null && isTutorModeEnabled
+                        ? `${answeredQuestionCount} of ${activeQuiz.questions.length} graded`
+                        : quizResult === null
+                          ? `${answeredQuestionCount} of ${activeQuiz.questions.length} answered`
+                          : 'Attempt submitted'}
                   </p>
                   {!isViewingStoredAttemptResult ? (
                     <button
@@ -741,9 +763,11 @@ function App(): JSX.Element {
                     >
                       {isSubmittingQuizAttempt
                         ? 'Submitting...'
-                        : quizResult === null
-                          ? 'Submit answers'
-                          : 'Submitted'}
+                        : quizResult === null && isTutorModeEnabled
+                          ? 'Save attempt'
+                          : quizResult === null
+                            ? 'Submit answers'
+                            : 'Submitted'}
                     </button>
                   ) : null}
                 </div>
