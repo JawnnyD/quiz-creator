@@ -13,6 +13,7 @@ function App(): JSX.Element {
   const [isLoadingQuizzes, setIsLoadingQuizzes] = useState(false)
   const [isCreatingQuiz, setIsCreatingQuiz] = useState(false)
   const [quizErrorMessage, setQuizErrorMessage] = useState<string | null>(null)
+  const [questionCountInput, setQuestionCountInput] = useState('5')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -123,8 +124,13 @@ function App(): JSX.Element {
 
   const generateQuizUnavailableReason =
     activeLesson === null ? null : getGenerateQuizUnavailableReason(activeLesson)
+  const questionCount = parseQuestionCountInput(questionCountInput)
+  const questionCountErrorMessage = getQuestionCountErrorMessage(questionCountInput)
   const canGenerateQuiz =
-    activeLesson !== null && generateQuizUnavailableReason === null && !isCreatingQuiz
+    activeLesson !== null &&
+    generateQuizUnavailableReason === null &&
+    questionCountErrorMessage === null &&
+    !isCreatingQuiz
 
   const openPdfPicker = async (): Promise<void> => {
     setIsImporting(true)
@@ -171,7 +177,7 @@ function App(): JSX.Element {
   }
 
   const createQuizForSelectedLesson = async (): Promise<void> => {
-    if (activeLesson === null || !canGenerateQuiz) {
+    if (activeLesson === null || !canGenerateQuiz || questionCount === null) {
       return
     }
 
@@ -181,7 +187,12 @@ function App(): JSX.Element {
     setQuizErrorMessage(null)
 
     try {
-      const createdQuiz = await window.api.createQuiz({ lessonId: activeLesson.id })
+      const createdQuiz = await window.api.createQuiz({
+        lessonId: activeLesson.id,
+        settings: {
+          questionCount
+        }
+      })
 
       setQuizzes((currentQuizzes) => upsertQuiz(currentQuizzes, createdQuiz.quiz))
       setSelectedQuizId(createdQuiz.quiz.id)
@@ -353,16 +364,41 @@ function App(): JSX.Element {
                 <h2 id="lesson-detail-heading">{activeLesson.title}</h2>
                 <p>{activeLesson.originalFileName}</p>
               </div>
-              <button
-                className="upload-button generate-button"
-                type="button"
-                onClick={() => {
-                  void createQuizForSelectedLesson()
-                }}
-                disabled={!canGenerateQuiz}
-              >
-                {isCreatingQuiz ? 'Generating...' : 'Generate quiz'}
-              </button>
+              <div className="quiz-create-controls">
+                <label className="quiz-setting-field">
+                  <span>Questions</span>
+                  <input
+                    className="quiz-question-count-input"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    value={questionCountInput}
+                    onChange={(event) => {
+                      setQuestionCountInput(event.currentTarget.value)
+                    }}
+                    aria-invalid={questionCountErrorMessage !== null}
+                    aria-describedby={
+                      questionCountErrorMessage === null ? undefined : 'question-count-error'
+                    }
+                  />
+                </label>
+                <button
+                  className="upload-button generate-button"
+                  type="button"
+                  onClick={() => {
+                    void createQuizForSelectedLesson()
+                  }}
+                  disabled={!canGenerateQuiz}
+                >
+                  {isCreatingQuiz ? 'Generating...' : 'Generate quiz'}
+                </button>
+                {questionCountErrorMessage !== null ? (
+                  <p className="quiz-setting-error" id="question-count-error">
+                    {questionCountErrorMessage}
+                  </p>
+                ) : null}
+              </div>
             </header>
 
             <dl className="detail-metadata">
@@ -534,6 +570,28 @@ function getGenerateQuizUnavailableReason(lesson: LessonRecord): string | null {
   }
 
   return null
+}
+
+function parseQuestionCountInput(value: string): number | null {
+  const trimmedValue = value.trim()
+
+  if (trimmedValue.length === 0 || !/^\d+$/.test(trimmedValue)) {
+    return null
+  }
+
+  const questionCount = Number(trimmedValue)
+
+  if (!Number.isSafeInteger(questionCount) || questionCount < 1) {
+    return null
+  }
+
+  return questionCount
+}
+
+function getQuestionCountErrorMessage(value: string): string | null {
+  return parseQuestionCountInput(value) === null
+    ? 'Enter a positive whole number of questions.'
+    : null
 }
 
 function getErrorMessage(error: unknown): string {
