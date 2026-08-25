@@ -155,6 +155,15 @@ function App(): JSX.Element {
     !isSubmittingQuizAttempt &&
     activeQuiz.questions.length > 0 &&
     answeredQuestionCount === activeQuiz.questions.length
+  const resultAnswersByQuestionId = useMemo(() => {
+    const answersByQuestionId = new Map<string, QuizResult['answers'][number]>()
+
+    for (const answer of quizResult?.answers ?? []) {
+      answersByQuestionId.set(answer.question.id, answer)
+    }
+
+    return answersByQuestionId
+  }, [quizResult])
 
   const openPdfPicker = async (): Promise<void> => {
     setIsImporting(true)
@@ -470,10 +479,26 @@ function App(): JSX.Element {
 
                 <ol className="quiz-question-list">
                   {activeQuiz.questions.map((question, questionIndex) => {
-                    const selectedChoiceId = selectedChoiceIdsByQuestionId[question.id]
+                    const resultAnswer = resultAnswersByQuestionId.get(question.id)
+                    const selectedChoiceId =
+                      resultAnswer?.selectedChoiceId ?? selectedChoiceIdsByQuestionId[question.id]
+                    const selectedChoice = question.choices.find(
+                      (choice) => choice.id === selectedChoiceId
+                    )
+                    const correctChoice = question.choices.find((choice) => choice.isCorrect)
+                    const reviewContent = getQuestionReviewContent(question.explanation)
 
                     return (
-                      <li className="quiz-question-card" key={question.id}>
+                      <li
+                        className={`quiz-question-card${
+                          resultAnswer === undefined
+                            ? ''
+                            : resultAnswer.isCorrect
+                              ? ' quiz-question-card-correct'
+                              : ' quiz-question-card-incorrect'
+                        }`}
+                        key={question.id}
+                      >
                         <h3>
                           <span>Question {questionIndex + 1}</span>
                           {question.prompt}
@@ -488,9 +513,18 @@ function App(): JSX.Element {
 
                             return (
                               <label
-                                className={`quiz-choice${
-                                  isSelectedChoice ? ' quiz-choice-selected' : ''
-                                }`}
+                                className={[
+                                  'quiz-choice',
+                                  isSelectedChoice ? 'quiz-choice-selected' : '',
+                                  quizResult !== null && choice.isCorrect
+                                    ? 'quiz-choice-correct'
+                                    : '',
+                                  quizResult !== null && isSelectedChoice && !choice.isCorrect
+                                    ? 'quiz-choice-incorrect'
+                                    : ''
+                                ]
+                                  .filter(Boolean)
+                                  .join(' ')}
                                 key={choice.id}
                               >
                                 <input
@@ -508,6 +542,44 @@ function App(): JSX.Element {
                             )
                           })}
                         </div>
+                        {resultAnswer !== undefined ? (
+                          <div className="quiz-review">
+                            <div className="quiz-review-header">
+                              <span
+                                className={`quiz-result-badge${
+                                  resultAnswer.isCorrect
+                                    ? ' quiz-result-badge-correct'
+                                    : ' quiz-result-badge-incorrect'
+                                }`}
+                              >
+                                {resultAnswer.isCorrect ? 'Correct' : 'Incorrect'}
+                              </span>
+                            </div>
+
+                            <dl className="quiz-review-details">
+                              <div>
+                                <dt>Your answer</dt>
+                                <dd>{selectedChoice?.choiceText ?? 'No answer recorded'}</dd>
+                              </div>
+                              <div>
+                                <dt>Correct answer</dt>
+                                <dd>{correctChoice?.choiceText ?? 'Correct answer unavailable'}</dd>
+                              </div>
+                            </dl>
+
+                            <div className="quiz-result-block">
+                              <h4>Explanation</h4>
+                              <p>{reviewContent.explanationText ?? 'No explanation available.'}</p>
+                            </div>
+
+                            <div className="quiz-result-block">
+                              <h4>Lesson reference</h4>
+                              <p>
+                                {reviewContent.lessonReference ?? 'Lesson reference unavailable.'}
+                              </p>
+                            </div>
+                          </div>
+                        ) : null}
                       </li>
                     )
                   })}
@@ -824,6 +896,35 @@ function getQuestionCountErrorMessage(value: string): string | null {
   return parseQuestionCountInput(value) === null
     ? 'Enter a positive whole number of questions.'
     : null
+}
+
+function getQuestionReviewContent(explanation: string | null): {
+  explanationText: string | null
+  lessonReference: string | null
+} {
+  const trimmedExplanation = explanation?.trim() ?? ''
+  const sourceExcerptPrefix = 'Source excerpt:'
+
+  if (trimmedExplanation.length === 0) {
+    return {
+      explanationText: null,
+      lessonReference: null
+    }
+  }
+
+  if (trimmedExplanation.toLowerCase().startsWith(sourceExcerptPrefix.toLowerCase())) {
+    const lessonReference = trimmedExplanation.slice(sourceExcerptPrefix.length).trim()
+
+    return {
+      explanationText: null,
+      lessonReference: lessonReference.length > 0 ? lessonReference : null
+    }
+  }
+
+  return {
+    explanationText: trimmedExplanation,
+    lessonReference: null
+  }
 }
 
 function getErrorMessage(error: unknown): string {
