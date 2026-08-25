@@ -13,7 +13,6 @@ function App(): JSX.Element {
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null)
   const [quizzes, setQuizzes] = useState<QuizRecord[]>([])
   const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>([])
-  const [selectedQuizId, setSelectedQuizId] = useState<string | null>(null)
   const [activeAttemptHistoryQuizId, setActiveAttemptHistoryQuizId] = useState<string | null>(null)
   const [isLoadingQuizzes, setIsLoadingQuizzes] = useState(false)
   const [isLoadingQuizAttempts, setIsLoadingQuizAttempts] = useState(false)
@@ -90,14 +89,12 @@ function App(): JSX.Element {
       setIsLoadingQuizzes(true)
       setQuizErrorMessage(null)
       setQuizzes([])
-      setSelectedQuizId(null)
 
       try {
         const loadedQuizzes = await window.api.listQuizzesForLesson(lessonId)
 
         if (!isCanceled) {
           setQuizzes(loadedQuizzes)
-          setSelectedQuizId(loadedQuizzes[0]?.id ?? null)
         }
       } catch (error) {
         if (!isCanceled) {
@@ -233,7 +230,6 @@ function App(): JSX.Element {
 
       setLessons((currentLessons) => upsertLesson(currentLessons, importedLesson))
       setActiveLessonId(importedLesson.id)
-      setSelectedQuizId(null)
       setActiveAttemptHistoryQuizId(null)
       resetQuizTakingState()
 
@@ -281,7 +277,6 @@ function App(): JSX.Element {
       })
 
       setQuizzes((currentQuizzes) => upsertQuiz(currentQuizzes, createdQuiz.quiz))
-      setSelectedQuizId(createdQuiz.quiz.id)
       setActiveAttemptHistoryQuizId(null)
       setStatusMessage(`Generated "${createdQuiz.quiz.title}" for "${activeLesson.title}".`)
     } catch (error) {
@@ -303,7 +298,6 @@ function App(): JSX.Element {
     setActiveLessonId(null)
     setQuizzes([])
     setQuizAttempts([])
-    setSelectedQuizId(null)
     setActiveAttemptHistoryQuizId(null)
     setIsLoadingQuizzes(false)
     setIsLoadingQuizAttempts(false)
@@ -316,7 +310,6 @@ function App(): JSX.Element {
     const requestId = quizLoadRequestIdRef.current + 1
     quizLoadRequestIdRef.current = requestId
 
-    setSelectedQuizId(quizId)
     setActiveAttemptHistoryQuizId(null)
     setActiveQuiz(null)
     setSelectedChoiceIdsByQuestionId({})
@@ -352,7 +345,6 @@ function App(): JSX.Element {
   }
 
   const openAttemptHistory = (quizId: string): void => {
-    setSelectedQuizId(quizId)
     setActiveAttemptHistoryQuizId(quizId)
     setStatusMessage(null)
     setErrorMessage(null)
@@ -389,7 +381,6 @@ function App(): JSX.Element {
         return
       }
 
-      setSelectedQuizId(loadedResult.quiz.id)
       setActiveAttemptHistoryQuizId(loadedResult.quiz.id)
       setSelectedChoiceIdsByQuestionId(getSelectedChoiceIdsByQuestionId(loadedResult))
       setQuizResult(loadedResult)
@@ -808,35 +799,39 @@ function App(): JSX.Element {
                     openLessonDetail(lesson.id)
                   }}
                 >
-                  <span className="lesson-title-text">{lesson.title}</span>
-                  <span className="lesson-file-name">{lesson.originalFileName}</span>
+                  <span>
+                    <span className="lesson-title-text">{lesson.title}</span>
+                    <span className="lesson-file-name">{lesson.originalFileName}</span>
+                  </span>
+                  <span className="lesson-metadata" aria-label="Lesson metadata">
+                    <span className="lesson-metadata-item">
+                      <span className="lesson-metadata-label">Size</span>
+                      <span className="lesson-metadata-value">
+                        {formatFileSize(lesson.sizeBytes)}
+                      </span>
+                    </span>
+                    <span className="lesson-metadata-item">
+                      <span className="lesson-metadata-label">Imported</span>
+                      <span className="lesson-metadata-value">{formatDate(lesson.createdAt)}</span>
+                    </span>
+                    <span className="lesson-metadata-item">
+                      <span className="lesson-metadata-label">Text</span>
+                      <span className="lesson-metadata-value">
+                        {formatExtractionStatus(lesson)}
+                      </span>
+                    </span>
+                  </span>
                 </button>
-                <div className="lesson-actions">
-                  <dl className="lesson-metadata">
-                    <div>
-                      <dt>Size</dt>
-                      <dd>{formatFileSize(lesson.sizeBytes)}</dd>
-                    </div>
-                    <div>
-                      <dt>Imported</dt>
-                      <dd>{formatDate(lesson.createdAt)}</dd>
-                    </div>
-                    <div>
-                      <dt>Text</dt>
-                      <dd>{formatExtractionStatus(lesson)}</dd>
-                    </div>
-                  </dl>
-                  <button
-                    className="delete-button"
-                    type="button"
-                    onClick={() => {
-                      void deleteLesson(lesson)
-                    }}
-                    disabled={deletingLessonIds.has(lesson.id)}
-                  >
-                    {deletingLessonIds.has(lesson.id) ? 'Deleting...' : 'Delete'}
-                  </button>
-                </div>
+                <button
+                  className="delete-button"
+                  type="button"
+                  onClick={() => {
+                    void deleteLesson(lesson)
+                  }}
+                  disabled={deletingLessonIds.has(lesson.id)}
+                >
+                  {deletingLessonIds.has(lesson.id) ? 'Deleting...' : 'Delete'}
+                </button>
               </li>
             ))}
           </ul>
@@ -945,19 +940,17 @@ function App(): JSX.Element {
               ) : (
                 <ul className="quiz-list" aria-label="Saved quizzes">
                   {quizzes.map((quiz) => {
-                    const isSelectedQuiz = quiz.id === selectedQuizId
                     const quizAttemptsForQuiz = attemptsByQuizId.get(quiz.id) ?? []
 
                     return (
                       <li className="quiz-list-item" key={quiz.id}>
                         <div className="quiz-item-row">
                           <button
-                            className={`quiz-item${isSelectedQuiz ? ' quiz-item-selected' : ''}`}
+                            className="quiz-item"
                             type="button"
                             onClick={() => {
                               void openQuizTaking(quiz.id)
                             }}
-                            aria-pressed={isSelectedQuiz}
                           >
                             <span>
                               <span className="quiz-title">{quiz.title}</span>
@@ -965,9 +958,6 @@ function App(): JSX.Element {
                                 Created {formatDate(quiz.createdAt)}
                               </span>
                             </span>
-                            {isSelectedQuiz ? (
-                              <span className="selected-badge">Selected</span>
-                            ) : null}
                           </button>
                           <button
                             className="history-button"
