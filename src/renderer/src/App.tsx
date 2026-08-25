@@ -845,24 +845,6 @@ function App(): JSX.Element {
                     <span className="lesson-title-text">{lesson.title}</span>
                     <span className="lesson-file-name">{lesson.originalFileName}</span>
                   </span>
-                  <span className="lesson-metadata" aria-label="Lesson metadata">
-                    <span className="lesson-metadata-item">
-                      <span className="lesson-metadata-label">Size</span>
-                      <span className="lesson-metadata-value">
-                        {formatFileSize(lesson.sizeBytes)}
-                      </span>
-                    </span>
-                    <span className="lesson-metadata-item">
-                      <span className="lesson-metadata-label">Imported</span>
-                      <span className="lesson-metadata-value">{formatDate(lesson.createdAt)}</span>
-                    </span>
-                    <span className="lesson-metadata-item">
-                      <span className="lesson-metadata-label">Text</span>
-                      <span className="lesson-metadata-value">
-                        {formatExtractionStatus(lesson)}
-                      </span>
-                    </span>
-                  </span>
                 </button>
                 <button
                   className="delete-button"
@@ -998,29 +980,6 @@ function App(): JSX.Element {
               </div>
             </header>
 
-            <dl className="detail-metadata">
-              <div>
-                <dt>File size</dt>
-                <dd>{formatFileSize(activeLesson.sizeBytes)}</dd>
-              </div>
-              <div>
-                <dt>Imported</dt>
-                <dd>{formatDate(activeLesson.createdAt)}</dd>
-              </div>
-              <div>
-                <dt>Text status</dt>
-                <dd>{formatExtractionStatus(activeLesson)}</dd>
-              </div>
-              <div>
-                <dt>Pages</dt>
-                <dd>{activeLesson.textPageCount}</dd>
-              </div>
-              <div>
-                <dt>Characters</dt>
-                <dd>{formatCompactNumber(activeLesson.textCharacterCount)}</dd>
-              </div>
-            </dl>
-
             {activeLesson.textExtractionError !== null ? (
               <p className="detail-alert" role="alert">
                 {activeLesson.textExtractionError}
@@ -1152,18 +1111,6 @@ function getSelectedChoiceIdsByQuestionId(result: QuizResult): Record<string, st
   return selectedChoiceIdsByQuestionId
 }
 
-function formatFileSize(sizeBytes: number): string {
-  if (sizeBytes < 1024) {
-    return `${sizeBytes} B`
-  }
-
-  if (sizeBytes < 1024 * 1024) {
-    return `${(sizeBytes / 1024).toFixed(1)} KB`
-  }
-
-  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 function formatDate(value: string): string {
   const date = new Date(value.replace(' ', 'T'))
 
@@ -1183,29 +1130,6 @@ function formatAttemptScore(attempt: QuizAttempt): string {
 
 function formatAttemptCompletedDate(attempt: QuizAttempt): string {
   return attempt.completedAt === null ? 'Not completed' : formatDate(attempt.completedAt)
-}
-
-function formatExtractionStatus(lesson: LessonRecord): string {
-  if (lesson.textExtractionStatus === 'failed') {
-    return 'Failed'
-  }
-
-  if (lesson.textExtractionStatus === 'not_started') {
-    return 'Not started'
-  }
-
-  if (lesson.textCharacterCount === 0) {
-    return 'No text'
-  }
-
-  return `${lesson.textPageCount} page${lesson.textPageCount === 1 ? '' : 's'}, ${formatCompactNumber(lesson.textCharacterCount)} chars`
-}
-
-function formatCompactNumber(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    notation: 'compact',
-    maximumFractionDigits: 1
-  }).format(value)
 }
 
 function getGenerateQuizUnavailableReason(lesson: LessonRecord): string | null {
