@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DeleteLessonResult, LessonRecord } from '../shared/lessons'
 import type {
+  QuizAttempt,
   QuizCreationSettings,
   QuizQuestion,
   QuizRecord,
@@ -32,12 +33,13 @@ const api = {
     ipcRenderer.invoke('quizzes:create', input),
   listQuizzesForLesson: (lessonId: string): Promise<QuizRecord[]> =>
     ipcRenderer.invoke('quizzes:listForLesson', lessonId),
-  getQuiz: (quizId: string): Promise<FullQuiz | null> =>
-    ipcRenderer.invoke('quizzes:get', quizId),
-  submitQuizAttempt: (
-    quizId: string,
-    answers: QuizAnswerSubmission[]
-  ): Promise<QuizResult> => ipcRenderer.invoke('quizzes:submitAttempt', quizId, answers)
+  listQuizAttemptsForLesson: (lessonId: string): Promise<QuizAttempt[]> =>
+    ipcRenderer.invoke('quizzes:listAttemptsForLesson', lessonId),
+  getQuiz: (quizId: string): Promise<FullQuiz | null> => ipcRenderer.invoke('quizzes:get', quizId),
+  getQuizAttemptResult: (attemptId: string): Promise<QuizResult | null> =>
+    ipcRenderer.invoke('quizzes:getAttemptResult', attemptId),
+  submitQuizAttempt: (quizId: string, answers: QuizAnswerSubmission[]): Promise<QuizResult> =>
+    ipcRenderer.invoke('quizzes:submitAttempt', quizId, answers)
 }
 
 if (process.contextIsolated) {

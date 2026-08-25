@@ -12,12 +12,15 @@ import {
 } from './lessons'
 import {
   generateTemporaryQuizFromLessonText,
+  listQuizAttemptsForLesson,
   listQuizzesForLesson,
   loadFullQuiz,
+  loadQuizAttemptResult,
   submitQuizAttempt,
   type FullQuiz,
   type GenerateTemporaryQuizInput,
   type QuizAnswerSubmission,
+  type QuizAttempt,
   type QuizRecord,
   type QuizResult
 } from './quizzes'
@@ -141,12 +144,30 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('quizzes:listAttemptsForLesson', (_, lessonId: string): QuizAttempt[] => {
+    try {
+      return listQuizAttemptsForLesson(lessonId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to load quiz attempts: ${message}`)
+    }
+  })
+
   ipcMain.handle('quizzes:get', (_, quizId: string): FullQuiz | null => {
     try {
       return loadFullQuiz(quizId)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`Unable to load quiz: ${message}`)
+    }
+  })
+
+  ipcMain.handle('quizzes:getAttemptResult', (_, attemptId: string): QuizResult | null => {
+    try {
+      return loadQuizAttemptResult(attemptId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to load quiz attempt: ${message}`)
     }
   })
 

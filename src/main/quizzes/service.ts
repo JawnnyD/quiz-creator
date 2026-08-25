@@ -188,13 +188,7 @@ export function saveQuizQuestionsFromDatabase(
     questions.forEach((question, questionIndex) => {
       const questionId = randomUUID()
 
-      insertQuestion.run(
-        questionId,
-        quizId,
-        question.prompt,
-        question.explanation,
-        questionIndex
-      )
+      insertQuestion.run(questionId, quizId, question.prompt, question.explanation, questionIndex)
 
       question.choices.forEach((choice, choiceIndex) => {
         insertChoice.run(
@@ -240,6 +234,32 @@ export function listQuizzesForLessonFromDatabase(
   return rows.map(mapQuizRow)
 }
 
+export function listQuizAttemptsForLessonFromDatabase(
+  connection: DatabaseSync,
+  lessonId: string
+): QuizAttempt[] {
+  const rows = connection
+    .prepare(
+      `
+        SELECT
+          quiz_attempts.id,
+          quiz_attempts.quiz_id,
+          quiz_attempts.started_at,
+          quiz_attempts.completed_at,
+          quiz_attempts.correct_answer_count,
+          quiz_attempts.total_question_count
+        FROM quiz_attempts
+        INNER JOIN quizzes ON quizzes.id = quiz_attempts.quiz_id
+        WHERE quizzes.lesson_id = ?
+          AND quiz_attempts.completed_at IS NOT NULL
+        ORDER BY quiz_attempts.completed_at DESC, quiz_attempts.started_at DESC
+      `
+    )
+    .all(lessonId) as unknown as QuizAttemptRow[]
+
+  return rows.map(mapQuizAttemptRow)
+}
+
 export function loadFullQuizFromDatabase(
   connection: DatabaseSync,
   quizId: string
@@ -254,6 +274,22 @@ export function loadFullQuizFromDatabase(
     quiz,
     questions: loadQuestionsForQuiz(connection, quizId)
   }
+}
+
+export function loadQuizAttemptResultFromDatabase(
+  connection: DatabaseSync,
+  attemptId: string
+): QuizResult | null {
+  const normalizedAttemptId = attemptId.trim()
+
+  if (
+    normalizedAttemptId.length === 0 ||
+    !completedQuizAttemptExists(connection, normalizedAttemptId)
+  ) {
+    return null
+  }
+
+  return loadQuizResultFromDatabase(connection, normalizedAttemptId)
 }
 
 export function gradeQuizAnswersFromDatabase(
@@ -334,9 +370,8 @@ export function submitQuizAttemptFromDatabase(
 }
 
 function lessonExists(connection: DatabaseSync, lessonId: string): boolean {
-  const row = connection
-    .prepare('SELECT 1 FROM lessons WHERE id = ?')
-    .get(lessonId) as unknown as { 1: number } | undefined
+  const row = connection.prepare('SELECT 1 FROM lessons WHERE id = ?').get(lessonId) as unknown as
+    { 1: number } | undefined
 
   return row !== undefined
 }
@@ -366,6 +401,22 @@ function quizHasAttempts(connection: DatabaseSync, quizId: string): boolean {
       `
     )
     .get(quizId) as unknown as { 1: number } | undefined
+
+  return row !== undefined
+}
+
+function completedQuizAttemptExists(connection: DatabaseSync, attemptId: string): boolean {
+  const row = connection
+    .prepare(
+      `
+        SELECT 1
+        FROM quiz_attempts
+        WHERE id = ?
+          AND completed_at IS NOT NULL
+        LIMIT 1
+      `
+    )
+    .get(attemptId) as unknown as { 1: number } | undefined
 
   return row !== undefined
 }
@@ -474,9 +525,7 @@ function loadQuizResultFromDatabase(connection: DatabaseSync, attemptId: string)
   }
 }
 
-function validateQuestionInputs(
-  questions: SaveQuizQuestionInput[]
-): ValidatedQuestionInput[] {
+function validateQuestionInputs(questions: SaveQuizQuestionInput[]): ValidatedQuestionInput[] {
   if (questions.length === 0) {
     throw new Error('At least one quiz question is required')
   }

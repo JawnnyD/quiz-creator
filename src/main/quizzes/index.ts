@@ -1,4 +1,4 @@
-import type { QuizQuestion, QuizRecord, QuizResult } from '../../shared/quizzes'
+import type { QuizAttempt, QuizQuestion, QuizRecord, QuizResult } from '../../shared/quizzes'
 
 import { initializeDatabase } from '../db'
 import {
@@ -8,8 +8,10 @@ import {
 import {
   createQuizRecordFromDatabase,
   gradeQuizAnswersFromDatabase,
+  listQuizAttemptsForLessonFromDatabase,
   listQuizzesForLessonFromDatabase,
   loadFullQuizFromDatabase,
+  loadQuizAttemptResultFromDatabase,
   saveQuizQuestionsFromDatabase,
   submitQuizAttemptFromDatabase,
   type CreateQuizRecordInput,
@@ -33,14 +35,14 @@ export type {
   SaveQuizQuestionsInput
 } from './service'
 export type { GenerateTemporaryQuizInput } from './generator'
-export {
-  generateTemporaryQuizFromLessonTextFromDatabase
-} from './generator'
+export { generateTemporaryQuizFromLessonTextFromDatabase } from './generator'
 export {
   createQuizRecordFromDatabase,
   gradeQuizAnswersFromDatabase,
+  listQuizAttemptsForLessonFromDatabase,
   listQuizzesForLessonFromDatabase,
   loadFullQuizFromDatabase,
+  loadQuizAttemptResultFromDatabase,
   saveQuizQuestionsFromDatabase,
   submitQuizAttemptFromDatabase
 } from './service'
@@ -57,26 +59,26 @@ export function listQuizzesForLesson(lessonId: string): QuizRecord[] {
   return listQuizzesForLessonFromDatabase(initializeDatabase(), lessonId)
 }
 
+export function listQuizAttemptsForLesson(lessonId: string): QuizAttempt[] {
+  return listQuizAttemptsForLessonFromDatabase(initializeDatabase(), lessonId)
+}
+
 export function loadFullQuiz(quizId: string): FullQuiz | null {
   return loadFullQuizFromDatabase(initializeDatabase(), quizId)
 }
 
-export function gradeQuizAnswers(
-  quizId: string,
-  answers: QuizAnswerSubmission[]
-): QuizResult {
+export function loadQuizAttemptResult(attemptId: string): QuizResult | null {
+  return loadQuizAttemptResultFromDatabase(initializeDatabase(), attemptId)
+}
+
+export function gradeQuizAnswers(quizId: string, answers: QuizAnswerSubmission[]): QuizResult {
   return gradeQuizAnswersFromDatabase(initializeDatabase(), quizId, answers)
 }
 
-export function submitQuizAttempt(
-  quizId: string,
-  answers: QuizAnswerSubmission[]
-): QuizResult {
+export function submitQuizAttempt(quizId: string, answers: QuizAnswerSubmission[]): QuizResult {
   return submitQuizAttemptFromDatabase(initializeDatabase(), quizId, answers)
 }
 
-export function generateTemporaryQuizFromLessonText(
-  input: GenerateTemporaryQuizInput
-): FullQuiz {
+export function generateTemporaryQuizFromLessonText(input: GenerateTemporaryQuizInput): FullQuiz {
   return generateTemporaryQuizFromLessonTextFromDatabase(initializeDatabase(), input)
 }
