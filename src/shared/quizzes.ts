@@ -1,7 +1,11 @@
+export type QuizDifficulty = 'easy' | 'nbme' | 'custom'
+
 export interface QuizRecord {
   id: string
   lessonId: string
   title: string
+  difficulty: QuizDifficulty | null
+  questionCount: number
   createdAt: string
   updatedAt: string
 }
@@ -51,4 +55,5 @@ export interface QuizResult {
 export interface QuizCreationSettings {
   questionCount: number
   choicesPerQuestion: number
+  difficulty?: QuizDifficulty
 }

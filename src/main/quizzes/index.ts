@@ -24,6 +24,7 @@ export type {
   QuizAttempt,
   QuizChoice,
   QuizCreationSettings,
+  QuizDifficulty,
   QuizQuestion,
   QuizRecord,
   QuizResult

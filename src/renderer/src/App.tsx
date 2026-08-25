@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { LessonRecord } from '../../shared/lessons'
-import type { QuizAttempt, QuizRecord, QuizResult } from '../../shared/quizzes'
+import type { QuizAttempt, QuizDifficulty, QuizRecord, QuizResult } from '../../shared/quizzes'
 
 type FullQuiz = NonNullable<Awaited<ReturnType<Window['api']['getQuiz']>>>
 type QuizAnswerSubmission = Parameters<Window['api']['submitQuizAttempt']>[1][number]
@@ -14,9 +14,11 @@ const difficultyOptions = [
   { id: 'easy', label: 'Easy', description: '' },
   { id: 'nbme', label: 'NBME', description: '' },
   { id: 'custom', label: 'Custom', description: 'Define your own rules for the quiz.' }
-] as const
-
-type DifficultyOptionId = (typeof difficultyOptions)[number]['id']
+] as const satisfies ReadonlyArray<{
+  id: QuizDifficulty
+  label: string
+  description: string
+}>
 
 function App(): JSX.Element {
   const [lessons, setLessons] = useState<LessonRecord[]>([])
@@ -33,7 +35,7 @@ function App(): JSX.Element {
   const [quizErrorMessage, setQuizErrorMessage] = useState<string | null>(null)
   const [quizAttemptErrorMessage, setQuizAttemptErrorMessage] = useState<string | null>(null)
   const [questionCountInput, setQuestionCountInput] = useState(defaultQuestionCountInput)
-  const [selectedDifficultyId, setSelectedDifficultyId] = useState<DifficultyOptionId>('easy')
+  const [selectedDifficultyId, setSelectedDifficultyId] = useState<QuizDifficulty>('easy')
   const [customDifficultyInstructions, setCustomDifficultyInstructions] = useState('')
   const [isTutorModeEnabled, setIsTutorModeEnabled] = useState(false)
   const [activeQuiz, setActiveQuiz] = useState<FullQuiz | null>(null)
@@ -291,7 +293,8 @@ function App(): JSX.Element {
       const createdQuiz = await window.api.createQuiz({
         lessonId: activeLesson.id,
         settings: {
-          questionCount
+          questionCount,
+          difficulty: selectedDifficultyId
         }
       })
 
@@ -1036,6 +1039,10 @@ function App(): JSX.Element {
                               <span className="quiz-created">
                                 Created {formatDate(quiz.createdAt)}
                               </span>
+                              <span className="quiz-metadata">
+                                <span>{formatQuizQuestionCount(quiz.questionCount)}</span>
+                                <span>{formatQuizDifficulty(quiz.difficulty)}</span>
+                              </span>
                             </span>
                           </button>
                           <button
@@ -1130,6 +1137,23 @@ function formatDate(value: string): string {
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(date)
+}
+
+function formatQuizQuestionCount(questionCount: number): string {
+  return `${questionCount} question${questionCount === 1 ? '' : 's'}`
+}
+
+function formatQuizDifficulty(difficulty: QuizRecord['difficulty']): string {
+  switch (difficulty) {
+    case 'easy':
+      return 'Easy'
+    case 'nbme':
+      return 'NBME'
+    case 'custom':
+      return 'Custom'
+    case null:
+      return 'Unknown'
+  }
 }
 
 function formatAttemptScore(attempt: QuizAttempt): string {

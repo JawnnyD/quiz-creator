@@ -88,7 +88,11 @@ export function generateTemporaryQuizFromLessonTextFromDatabase(
 
   const title = input.title?.trim() || defaultQuizTitle
   const questions = generateTemporaryQuestions(fullText, settings)
-  const quiz = createQuizRecordFromDatabase(connection, { lessonId, title })
+  const quiz = createQuizRecordFromDatabase(connection, {
+    lessonId,
+    title,
+    ...(settings.difficulty === undefined ? {} : { difficulty: settings.difficulty })
+  })
 
   try {
     saveQuizQuestionsFromDatabase(connection, {
@@ -127,10 +131,16 @@ function normalizeQuizSettings(
     throw new Error('Temporary quiz choices per question must be an integer of at least 2')
   }
 
-  return {
+  const normalizedSettings: QuizCreationSettings = {
     questionCount,
     choicesPerQuestion
   }
+
+  if (settings?.difficulty !== undefined) {
+    normalizedSettings.difficulty = settings.difficulty
+  }
+
+  return normalizedSettings
 }
 
 function generateTemporaryQuestions(

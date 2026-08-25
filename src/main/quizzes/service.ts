@@ -4,22 +4,30 @@ import type { DatabaseSync } from 'node:sqlite'
 import type {
   QuizAttempt,
   QuizChoice,
+  QuizDifficulty,
   QuizQuestion,
   QuizRecord,
   QuizResult
 } from '../../shared/quizzes'
 
 const quizColumns = `
-  id,
-  lesson_id,
-  title,
-  created_at,
-  updated_at
+  quizzes.id AS id,
+  quizzes.lesson_id AS lesson_id,
+  quizzes.title AS title,
+  quizzes.difficulty AS difficulty,
+  (
+    SELECT COUNT(*)
+    FROM quiz_questions
+    WHERE quiz_questions.quiz_id = quizzes.id
+  ) AS question_count,
+  quizzes.created_at AS created_at,
+  quizzes.updated_at AS updated_at
 `
 
 export interface CreateQuizRecordInput {
   lessonId: string
   title: string
+  difficulty?: QuizDifficulty | null
 }
 
 export interface SaveQuizQuestionsInput {
@@ -52,6 +60,8 @@ interface QuizRow {
   id: string
   lesson_id: string
   title: string
+  difficulty: string | null
+  question_count: number
   created_at: string
   updated_at: string
 }
@@ -109,6 +119,7 @@ export function createQuizRecordFromDatabase(
 ): QuizRecord {
   const lessonId = input.lessonId.trim()
   const title = input.title.trim()
+  const difficulty = normalizeQuizDifficulty(input.difficulty)
 
   if (lessonId.length === 0) {
     throw new Error('Lesson id is required to create a quiz')
@@ -127,11 +138,11 @@ export function createQuizRecordFromDatabase(
   connection
     .prepare(
       `
-        INSERT INTO quizzes (id, lesson_id, title)
-        VALUES (?, ?, ?)
+        INSERT INTO quizzes (id, lesson_id, title, difficulty)
+        VALUES (?, ?, ?, ?)
       `
     )
-    .run(id, lessonId, title)
+    .run(id, lessonId, title, difficulty)
 
   const quiz = findQuizById(connection, id)
 
@@ -649,9 +660,25 @@ function mapQuizRow(row: QuizRow): QuizRecord {
     id: row.id,
     lessonId: row.lesson_id,
     title: row.title,
+    difficulty: normalizeQuizDifficulty(row.difficulty),
+    questionCount: row.question_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }
+}
+
+function normalizeQuizDifficulty(
+  value: QuizDifficulty | string | null | undefined
+): QuizDifficulty | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+
+  if (value === 'easy' || value === 'nbme' || value === 'custom') {
+    return value
+  }
+
+  throw new Error(`Unsupported quiz difficulty: ${value}`)
 }
 
 function mapQuizQuestionRow(row: QuizQuestionRow): Omit<QuizQuestion, 'choices'> {

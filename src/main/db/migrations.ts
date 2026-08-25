@@ -218,5 +218,13 @@ export const migrations: readonly Migration[] = [
         );
       END;
     `
+  },
+  {
+    version: 5,
+    name: 'add_quiz_difficulty',
+    sql: `
+      ALTER TABLE quizzes
+        ADD COLUMN difficulty TEXT CHECK (difficulty IN ('easy', 'nbme', 'custom'));
+    `
   }
 ]
