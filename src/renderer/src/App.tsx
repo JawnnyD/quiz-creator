@@ -5,6 +5,19 @@ import type { QuizAttempt, QuizRecord, QuizResult } from '../../shared/quizzes'
 type FullQuiz = NonNullable<Awaited<ReturnType<Window['api']['getQuiz']>>>
 type QuizAnswerSubmission = Parameters<Window['api']['submitQuizAttempt']>[1][number]
 
+const defaultQuestionCountInput = '10'
+const minQuestionCount = 0
+const maxQuestionCount = 50
+const questionCountSliderStep = 5
+
+const difficultyOptions = [
+  { id: 'easy', label: 'Easy', description: '' },
+  { id: 'nbme', label: 'NBME', description: '' },
+  { id: 'custom', label: 'Custom', description: 'Define your own rules for the quiz.' }
+] as const
+
+type DifficultyOptionId = (typeof difficultyOptions)[number]['id']
+
 function App(): JSX.Element {
   const [lessons, setLessons] = useState<LessonRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -19,7 +32,9 @@ function App(): JSX.Element {
   const [isCreatingQuiz, setIsCreatingQuiz] = useState(false)
   const [quizErrorMessage, setQuizErrorMessage] = useState<string | null>(null)
   const [quizAttemptErrorMessage, setQuizAttemptErrorMessage] = useState<string | null>(null)
-  const [questionCountInput, setQuestionCountInput] = useState('5')
+  const [questionCountInput, setQuestionCountInput] = useState(defaultQuestionCountInput)
+  const [selectedDifficultyId, setSelectedDifficultyId] = useState<DifficultyOptionId>('easy')
+  const [customDifficultyInstructions, setCustomDifficultyInstructions] = useState('')
   const [activeQuiz, setActiveQuiz] = useState<FullQuiz | null>(null)
   const [selectedChoiceIdsByQuestionId, setSelectedChoiceIdsByQuestionId] = useState<
     Record<string, string>
@@ -169,9 +184,12 @@ function App(): JSX.Element {
     activeLesson === null ? null : getGenerateQuizUnavailableReason(activeLesson)
   const questionCount = parseQuestionCountInput(questionCountInput)
   const questionCountErrorMessage = getQuestionCountErrorMessage(questionCountInput)
+  const questionCountSliderValue = getQuestionCountSliderValue(questionCountInput)
   const canGenerateQuiz =
     activeLesson !== null &&
     generateQuizUnavailableReason === null &&
+    questionCount !== null &&
+    questionCount > 0 &&
     questionCountErrorMessage === null &&
     !isCreatingQuiz
   const isQuizTakingView =
@@ -850,39 +868,109 @@ function App(): JSX.Element {
                 <p>{activeLesson.originalFileName}</p>
               </div>
               <div className="quiz-create-controls">
-                <label className="quiz-setting-field">
-                  <span>Questions</span>
-                  <input
-                    className="quiz-question-count-input"
-                    type="number"
-                    min="1"
-                    step="1"
-                    inputMode="numeric"
-                    value={questionCountInput}
-                    onChange={(event) => {
-                      setQuestionCountInput(event.currentTarget.value)
+                <div className="quiz-create-top-row">
+                  <div className="quiz-question-setting">
+                    <span className="quiz-setting-label">Questions</span>
+                    <div className="quiz-question-count-controls">
+                      <input
+                        className="quiz-question-count-slider"
+                        type="range"
+                        min={minQuestionCount}
+                        max={maxQuestionCount}
+                        step={questionCountSliderStep}
+                        value={questionCountSliderValue}
+                        onChange={(event) => {
+                          setQuestionCountInput(event.currentTarget.value)
+                        }}
+                        aria-label="Question count slider"
+                        aria-describedby={
+                          questionCountErrorMessage === null ? undefined : 'question-count-error'
+                        }
+                      />
+                      <label className="quiz-question-count-number">
+                        <span>Count</span>
+                        <input
+                          className="quiz-question-count-input"
+                          type="number"
+                          min={minQuestionCount}
+                          max={maxQuestionCount}
+                          step="1"
+                          inputMode="numeric"
+                          value={questionCountInput}
+                          onChange={(event) => {
+                            setQuestionCountInput(event.currentTarget.value)
+                          }}
+                          aria-invalid={questionCountErrorMessage !== null}
+                          aria-describedby={
+                            questionCountErrorMessage === null ? undefined : 'question-count-error'
+                          }
+                        />
+                      </label>
+                    </div>
+                    {questionCountErrorMessage !== null ? (
+                      <p className="quiz-setting-error" id="question-count-error">
+                        {questionCountErrorMessage}
+                      </p>
+                    ) : null}
+                  </div>
+                  <button
+                    className="upload-button generate-button"
+                    type="button"
+                    onClick={() => {
+                      void createQuizForSelectedLesson()
                     }}
-                    aria-invalid={questionCountErrorMessage !== null}
-                    aria-describedby={
-                      questionCountErrorMessage === null ? undefined : 'question-count-error'
-                    }
-                  />
-                </label>
-                <button
-                  className="upload-button generate-button"
-                  type="button"
-                  onClick={() => {
-                    void createQuizForSelectedLesson()
-                  }}
-                  disabled={!canGenerateQuiz}
-                >
-                  {isCreatingQuiz ? 'Generating...' : 'Generate quiz'}
-                </button>
-                {questionCountErrorMessage !== null ? (
-                  <p className="quiz-setting-error" id="question-count-error">
-                    {questionCountErrorMessage}
-                  </p>
-                ) : null}
+                    disabled={!canGenerateQuiz}
+                  >
+                    {isCreatingQuiz ? 'Generating...' : 'Generate quiz'}
+                  </button>
+                </div>
+                <div className="quiz-difficulty-setting">
+                  <span className="quiz-setting-label" id="quiz-difficulty-label">
+                    Difficulty
+                  </span>
+                  <div
+                    className="quiz-difficulty-options"
+                    role="group"
+                    aria-labelledby="quiz-difficulty-label"
+                  >
+                    {difficultyOptions.map((difficulty) => {
+                      const isSelectedDifficulty = selectedDifficultyId === difficulty.id
+
+                      return (
+                        <button
+                          className={`quiz-difficulty-option${
+                            isSelectedDifficulty ? ' quiz-difficulty-option-selected' : ''
+                          }`}
+                          type="button"
+                          key={difficulty.id}
+                          onClick={() => {
+                            setSelectedDifficultyId(difficulty.id)
+                          }}
+                          aria-pressed={isSelectedDifficulty}
+                        >
+                          <span className="quiz-difficulty-title">{difficulty.label}</span>
+                          {difficulty.description.length > 0 ? (
+                            <span className="quiz-difficulty-description">
+                              {difficulty.description}
+                            </span>
+                          ) : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {selectedDifficultyId === 'custom' ? (
+                    <label className="quiz-custom-instructions-field">
+                      <span className="quiz-setting-label">Custom instructions</span>
+                      <textarea
+                        className="quiz-custom-instructions-input"
+                        value={customDifficultyInstructions}
+                        onChange={(event) => {
+                          setCustomDifficultyInstructions(event.currentTarget.value)
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                </div>
               </div>
             </header>
 
@@ -1121,7 +1209,11 @@ function parseQuestionCountInput(value: string): number | null {
 
   const questionCount = Number(trimmedValue)
 
-  if (!Number.isSafeInteger(questionCount) || questionCount < 1) {
+  if (
+    !Number.isSafeInteger(questionCount) ||
+    questionCount < minQuestionCount ||
+    questionCount > maxQuestionCount
+  ) {
     return null
   }
 
@@ -1129,9 +1221,27 @@ function parseQuestionCountInput(value: string): number | null {
 }
 
 function getQuestionCountErrorMessage(value: string): string | null {
-  return parseQuestionCountInput(value) === null
-    ? 'Enter a positive whole number of questions.'
-    : null
+  const questionCount = parseQuestionCountInput(value)
+
+  if (questionCount === null) {
+    return `Enter a whole number from 1 to ${maxQuestionCount}.`
+  }
+
+  if (questionCount === 0) {
+    return 'Choose at least 1 question.'
+  }
+
+  return null
+}
+
+function getQuestionCountSliderValue(value: string): number {
+  const parsedValue = Number(value)
+
+  if (!Number.isFinite(parsedValue)) {
+    return minQuestionCount
+  }
+
+  return Math.min(Math.max(parsedValue, minQuestionCount), maxQuestionCount)
 }
 
 function getQuestionReviewContent(explanation: string | null): {

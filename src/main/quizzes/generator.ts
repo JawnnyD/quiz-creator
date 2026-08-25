@@ -11,8 +11,9 @@ import {
 } from './service'
 
 const defaultQuizTitle = 'Temporary Quiz'
+const maxTemporaryQuizQuestionCount = 50
 const defaultQuizSettings: QuizCreationSettings = {
-  questionCount: 5,
+  questionCount: 10,
   choicesPerQuestion: 4
 }
 const fallbackDistractors = [
@@ -112,11 +113,14 @@ function normalizeQuizSettings(
   settings: Partial<QuizCreationSettings> | undefined
 ): QuizCreationSettings {
   const questionCount = settings?.questionCount ?? defaultQuizSettings.questionCount
-  const choicesPerQuestion =
-    settings?.choicesPerQuestion ?? defaultQuizSettings.choicesPerQuestion
+  const choicesPerQuestion = settings?.choicesPerQuestion ?? defaultQuizSettings.choicesPerQuestion
 
   if (!Number.isInteger(questionCount) || questionCount <= 0) {
     throw new Error('Temporary quiz question count must be a positive integer')
+  }
+
+  if (questionCount > maxTemporaryQuizQuestionCount) {
+    throw new Error(`Temporary quiz question count cannot exceed ${maxTemporaryQuizQuestionCount}`)
   }
 
   if (!Number.isInteger(choicesPerQuestion) || choicesPerQuestion < 2) {
