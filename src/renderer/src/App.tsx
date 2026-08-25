@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState, type JSX } from 'react'
 import type { LessonRecord } from '../../shared/lessons'
+import type { QuizRecord } from '../../shared/quizzes'
 
 function App(): JSX.Element {
   const [lessons, setLessons] = useState<LessonRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isImporting, setIsImporting] = useState(false)
   const [deletingLessonIds, setDeletingLessonIds] = useState<Set<string>>(() => new Set())
+  const [activeLessonId, setActiveLessonId] = useState<string | null>(null)
+  const [quizzes, setQuizzes] = useState<QuizRecord[]>([])
+  const [selectedQuizId, setSelectedQuizId] = useState<string | null>(null)
+  const [isLoadingQuizzes, setIsLoadingQuizzes] = useState(false)
+  const [isCreatingQuiz, setIsCreatingQuiz] = useState(false)
+  const [quizErrorMessage, setQuizErrorMessage] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -37,6 +44,55 @@ function App(): JSX.Element {
     }
   }, [])
 
+  const activeLesson = useMemo(() => {
+    if (activeLessonId === null) {
+      return null
+    }
+
+    return lessons.find((lesson) => lesson.id === activeLessonId) ?? null
+  }, [lessons, activeLessonId])
+
+  const activeLessonIdForQuizLoading = activeLesson?.id ?? null
+
+  useEffect(() => {
+    if (activeLessonIdForQuizLoading === null) {
+      return
+    }
+
+    const lessonId = activeLessonIdForQuizLoading
+    let isCanceled = false
+
+    async function loadQuizzes(): Promise<void> {
+      setIsLoadingQuizzes(true)
+      setQuizErrorMessage(null)
+      setQuizzes([])
+      setSelectedQuizId(null)
+
+      try {
+        const loadedQuizzes = await window.api.listQuizzesForLesson(lessonId)
+
+        if (!isCanceled) {
+          setQuizzes(loadedQuizzes)
+          setSelectedQuizId(loadedQuizzes[0]?.id ?? null)
+        }
+      } catch (error) {
+        if (!isCanceled) {
+          setQuizErrorMessage(getErrorMessage(error))
+        }
+      } finally {
+        if (!isCanceled) {
+          setIsLoadingQuizzes(false)
+        }
+      }
+    }
+
+    void loadQuizzes()
+
+    return () => {
+      isCanceled = true
+    }
+  }, [activeLessonIdForQuizLoading])
+
   const lessonSummary = useMemo(() => {
     if (isLoading) {
       return 'Loading saved lessons'
@@ -49,10 +105,32 @@ function App(): JSX.Element {
     return `${lessons.length} lesson PDF${lessons.length === 1 ? '' : 's'} imported`
   }, [isLoading, lessons.length])
 
+  const quizSummary = useMemo(() => {
+    if (activeLesson === null) {
+      return 'No lesson selected'
+    }
+
+    if (isLoadingQuizzes) {
+      return 'Loading saved quizzes'
+    }
+
+    if (quizzes.length === 0) {
+      return 'No quizzes created yet'
+    }
+
+    return `${quizzes.length} quiz${quizzes.length === 1 ? '' : 'zes'} created`
+  }, [activeLesson, isLoadingQuizzes, quizzes.length])
+
+  const generateQuizUnavailableReason =
+    activeLesson === null ? null : getGenerateQuizUnavailableReason(activeLesson)
+  const canGenerateQuiz =
+    activeLesson !== null && generateQuizUnavailableReason === null && !isCreatingQuiz
+
   const openPdfPicker = async (): Promise<void> => {
     setIsImporting(true)
     setStatusMessage(null)
     setErrorMessage(null)
+    setQuizErrorMessage(null)
 
     try {
       const importedLesson = await window.api.importLessonPdf()
@@ -64,6 +142,8 @@ function App(): JSX.Element {
       const wasAlreadyImported = lessons.some((lesson) => lesson.id === importedLesson.id)
 
       setLessons((currentLessons) => upsertLesson(currentLessons, importedLesson))
+      setActiveLessonId(importedLesson.id)
+      setSelectedQuizId(null)
 
       if (importedLesson.textExtractionStatus === 'failed') {
         setErrorMessage(
@@ -90,6 +170,42 @@ function App(): JSX.Element {
     }
   }
 
+  const createQuizForSelectedLesson = async (): Promise<void> => {
+    if (activeLesson === null || !canGenerateQuiz) {
+      return
+    }
+
+    setIsCreatingQuiz(true)
+    setStatusMessage(null)
+    setErrorMessage(null)
+    setQuizErrorMessage(null)
+
+    try {
+      const createdQuiz = await window.api.createQuiz({ lessonId: activeLesson.id })
+
+      setQuizzes((currentQuizzes) => upsertQuiz(currentQuizzes, createdQuiz.quiz))
+      setSelectedQuizId(createdQuiz.quiz.id)
+      setStatusMessage(`Generated "${createdQuiz.quiz.title}" for "${activeLesson.title}".`)
+    } catch (error) {
+      setQuizErrorMessage(getErrorMessage(error))
+    } finally {
+      setIsCreatingQuiz(false)
+    }
+  }
+
+  const openLessonDetail = (lessonId: string): void => {
+    setActiveLessonId(lessonId)
+    setQuizErrorMessage(null)
+  }
+
+  const closeLessonDetail = (): void => {
+    setActiveLessonId(null)
+    setQuizzes([])
+    setSelectedQuizId(null)
+    setIsLoadingQuizzes(false)
+    setQuizErrorMessage(null)
+  }
+
   const deleteLesson = async (lesson: LessonRecord): Promise<void> => {
     const confirmed = window.confirm(
       `Delete "${lesson.title}"?\n\nThis removes the lesson and the imported PDF copy.`
@@ -101,6 +217,7 @@ function App(): JSX.Element {
 
     setStatusMessage(null)
     setErrorMessage(null)
+    setQuizErrorMessage(null)
     setLessonDeleting(lesson.id, true)
 
     try {
@@ -146,21 +263,26 @@ function App(): JSX.Element {
 
   return (
     <main className="app">
-      <section className="lesson-workspace" aria-labelledby="lessons-heading">
-        <header className="lesson-header">
-          <div>
-            <h1 id="lessons-heading">Lessons</h1>
-            <p>{lessonSummary}</p>
-          </div>
-          <button
-            className="upload-button"
-            type="button"
-            onClick={openPdfPicker}
-            disabled={isImporting}
-          >
-            {isImporting ? 'Importing...' : 'Upload PDF'}
-          </button>
-        </header>
+      <section
+        className="lesson-workspace"
+        aria-labelledby={activeLesson === null ? 'lessons-heading' : 'lesson-detail-heading'}
+      >
+        {activeLesson === null ? (
+          <header className="lesson-header">
+            <div>
+              <h1 id="lessons-heading">Lessons</h1>
+              <p>{lessonSummary}</p>
+            </div>
+            <button
+              className="upload-button"
+              type="button"
+              onClick={openPdfPicker}
+              disabled={isImporting}
+            >
+              {isImporting ? 'Importing...' : 'Upload PDF'}
+            </button>
+          </header>
+        ) : null}
 
         {errorMessage !== null ? (
           <p className="status-message status-message-error" role="alert">
@@ -172,16 +294,22 @@ function App(): JSX.Element {
 
         {isLoading ? (
           <p className="empty-state">Loading lessons...</p>
-        ) : lessons.length === 0 ? (
+        ) : activeLesson === null && lessons.length === 0 ? (
           <p className="empty-state">Import a PDF to create your first lesson.</p>
-        ) : (
+        ) : activeLesson === null ? (
           <ul className="lesson-list" aria-label="Imported lessons">
             {lessons.map((lesson) => (
               <li className="lesson-item" key={lesson.id}>
-                <div className="lesson-title-group">
-                  <h2>{lesson.title}</h2>
-                  <p>{lesson.originalFileName}</p>
-                </div>
+                <button
+                  className="lesson-select-button"
+                  type="button"
+                  onClick={() => {
+                    openLessonDetail(lesson.id)
+                  }}
+                >
+                  <span className="lesson-title-text">{lesson.title}</span>
+                  <span className="lesson-file-name">{lesson.originalFileName}</span>
+                </button>
                 <div className="lesson-actions">
                   <dl className="lesson-metadata">
                     <div>
@@ -211,6 +339,113 @@ function App(): JSX.Element {
               </li>
             ))}
           </ul>
+        ) : (
+          <section className="lesson-detail" aria-labelledby="lesson-detail-heading">
+            <div className="detail-topbar">
+              <button className="back-button" type="button" onClick={closeLessonDetail}>
+                Back
+              </button>
+            </div>
+
+            <header className="detail-header">
+              <div className="detail-title-group">
+                <p className="detail-kicker">Lesson info</p>
+                <h2 id="lesson-detail-heading">{activeLesson.title}</h2>
+                <p>{activeLesson.originalFileName}</p>
+              </div>
+              <button
+                className="upload-button generate-button"
+                type="button"
+                onClick={() => {
+                  void createQuizForSelectedLesson()
+                }}
+                disabled={!canGenerateQuiz}
+              >
+                {isCreatingQuiz ? 'Generating...' : 'Generate quiz'}
+              </button>
+            </header>
+
+            <dl className="detail-metadata">
+              <div>
+                <dt>File size</dt>
+                <dd>{formatFileSize(activeLesson.sizeBytes)}</dd>
+              </div>
+              <div>
+                <dt>Imported</dt>
+                <dd>{formatDate(activeLesson.createdAt)}</dd>
+              </div>
+              <div>
+                <dt>Text status</dt>
+                <dd>{formatExtractionStatus(activeLesson)}</dd>
+              </div>
+              <div>
+                <dt>Pages</dt>
+                <dd>{activeLesson.textPageCount}</dd>
+              </div>
+              <div>
+                <dt>Characters</dt>
+                <dd>{formatCompactNumber(activeLesson.textCharacterCount)}</dd>
+              </div>
+            </dl>
+
+            {activeLesson.textExtractionError !== null ? (
+              <p className="detail-alert" role="alert">
+                {activeLesson.textExtractionError}
+              </p>
+            ) : null}
+
+            {generateQuizUnavailableReason !== null ? (
+              <p className="detail-note">{generateQuizUnavailableReason}</p>
+            ) : null}
+
+            <section className="quiz-section" aria-labelledby="quizzes-heading">
+              <header className="quiz-section-header">
+                <div>
+                  <h3 id="quizzes-heading">Quizzes</h3>
+                  <p>{quizSummary}</p>
+                </div>
+              </header>
+
+              {quizErrorMessage !== null ? (
+                <p className="status-message status-message-error" role="alert">
+                  {quizErrorMessage}
+                </p>
+              ) : null}
+
+              {isLoadingQuizzes ? (
+                <p className="empty-state detail-empty-state">Loading quizzes...</p>
+              ) : quizzes.length === 0 ? (
+                <p className="empty-state detail-empty-state">No quizzes for this lesson yet.</p>
+              ) : (
+                <ul className="quiz-list" aria-label="Saved quizzes">
+                  {quizzes.map((quiz) => {
+                    const isSelectedQuiz = quiz.id === selectedQuizId
+
+                    return (
+                      <li key={quiz.id}>
+                        <button
+                          className={`quiz-item${isSelectedQuiz ? ' quiz-item-selected' : ''}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedQuizId(quiz.id)
+                          }}
+                          aria-pressed={isSelectedQuiz}
+                        >
+                          <span>
+                            <span className="quiz-title">{quiz.title}</span>
+                            <span className="quiz-created">
+                              Created {formatDate(quiz.createdAt)}
+                            </span>
+                          </span>
+                          {isSelectedQuiz ? <span className="selected-badge">Selected</span> : null}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
+          </section>
         )}
       </section>
     </main>
@@ -224,6 +459,16 @@ function upsertLesson(lessons: LessonRecord[], lesson: LessonRecord): LessonReco
 
   return nextLessons.sort((firstLesson, secondLesson) =>
     secondLesson.createdAt.localeCompare(firstLesson.createdAt)
+  )
+}
+
+function upsertQuiz(quizzes: QuizRecord[], quiz: QuizRecord): QuizRecord[] {
+  const nextQuizzes = quizzes.some((currentQuiz) => currentQuiz.id === quiz.id)
+    ? quizzes.map((currentQuiz) => (currentQuiz.id === quiz.id ? quiz : currentQuiz))
+    : [quiz, ...quizzes]
+
+  return nextQuizzes.sort((firstQuiz, secondQuiz) =>
+    secondQuiz.createdAt.localeCompare(firstQuiz.createdAt)
   )
 }
 
@@ -273,6 +518,22 @@ function formatCompactNumber(value: number): string {
     notation: 'compact',
     maximumFractionDigits: 1
   }).format(value)
+}
+
+function getGenerateQuizUnavailableReason(lesson: LessonRecord): string | null {
+  if (lesson.textExtractionStatus === 'failed') {
+    return 'Quiz generation is unavailable because text extraction failed.'
+  }
+
+  if (lesson.textExtractionStatus === 'not_started') {
+    return 'Quiz generation is available after lesson text extraction completes.'
+  }
+
+  if (lesson.textCharacterCount === 0) {
+    return 'Quiz generation is unavailable because no selectable text was found.'
+  }
+
+  return null
 }
 
 function getErrorMessage(error: unknown): string {
