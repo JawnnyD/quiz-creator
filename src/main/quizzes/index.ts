@@ -14,6 +14,7 @@ import {
   loadQuizAttemptResultFromDatabase,
   saveQuizQuestionsFromDatabase,
   submitQuizAttemptFromDatabase,
+  updateQuizTitleFromDatabase,
   type CreateQuizRecordInput,
   type FullQuiz,
   type QuizAnswerSubmission,
@@ -45,7 +46,8 @@ export {
   loadFullQuizFromDatabase,
   loadQuizAttemptResultFromDatabase,
   saveQuizQuestionsFromDatabase,
-  submitQuizAttemptFromDatabase
+  submitQuizAttemptFromDatabase,
+  updateQuizTitleFromDatabase
 } from './service'
 
 export function createQuizRecord(input: CreateQuizRecordInput): QuizRecord {
@@ -58,6 +60,10 @@ export function saveQuizQuestions(input: SaveQuizQuestionsInput): QuizQuestion[]
 
 export function listQuizzesForLesson(lessonId: string): QuizRecord[] {
   return listQuizzesForLessonFromDatabase(initializeDatabase(), lessonId)
+}
+
+export function updateQuizTitle(quizId: string, title: string): QuizRecord {
+  return updateQuizTitleFromDatabase(initializeDatabase(), quizId, title)
 }
 
 export function listQuizAttemptsForLesson(lessonId: string): QuizAttempt[] {

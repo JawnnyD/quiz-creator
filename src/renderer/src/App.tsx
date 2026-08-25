@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
+import { useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent } from 'react'
 import type { LessonRecord } from '../../shared/lessons'
 import type { QuizAttempt, QuizDifficulty, QuizRecord, QuizResult } from '../../shared/quizzes'
 
 type FullQuiz = NonNullable<Awaited<ReturnType<Window['api']['getQuiz']>>>
 type QuizAnswerSubmission = Parameters<Window['api']['submitQuizAttempt']>[1][number]
+type TitleEditTargetKind = 'lesson' | 'quiz'
+
+interface TitleEditTarget {
+  kind: TitleEditTargetKind
+  id: string
+}
 
 const defaultQuestionCountInput = '10'
 const minQuestionCount = 0
@@ -38,6 +44,10 @@ function App(): JSX.Element {
   const [selectedDifficultyId, setSelectedDifficultyId] = useState<QuizDifficulty>('easy')
   const [customDifficultyInstructions, setCustomDifficultyInstructions] = useState('')
   const [isTutorModeEnabled, setIsTutorModeEnabled] = useState(false)
+  const [titleEditTarget, setTitleEditTarget] = useState<TitleEditTarget | null>(null)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [titleEditErrorMessage, setTitleEditErrorMessage] = useState<string | null>(null)
+  const [isSavingTitle, setIsSavingTitle] = useState(false)
   const [activeQuiz, setActiveQuiz] = useState<FullQuiz | null>(null)
   const [selectedChoiceIdsByQuestionId, setSelectedChoiceIdsByQuestionId] = useState<
     Record<string, string>
@@ -198,6 +208,8 @@ function App(): JSX.Element {
   const isQuizTakingView =
     activeQuiz !== null || isLoadingActiveQuiz || quizTakingErrorMessage !== null
   const isViewingStoredAttemptResult = activeAttemptHistoryQuizId !== null && quizResult !== null
+  const activeQuizTitle = activeQuiz?.quiz.title ?? activeAttemptHistoryQuiz?.title ?? 'Quiz'
+  const activeQuizTitleEditId = activeQuiz?.quiz.id ?? activeAttemptHistoryQuiz?.id ?? null
   const answeredQuestionCount =
     activeQuiz?.questions.filter(
       (question) => selectedChoiceIdsByQuestionId[question.id] !== undefined
@@ -233,6 +245,137 @@ function App(): JSX.Element {
       ? []
       : (attemptsByQuizId.get(activeAttemptHistoryQuiz.id) ?? [])
 
+  const isEditingTitle = (kind: TitleEditTargetKind, id: string): boolean =>
+    titleEditTarget?.kind === kind && titleEditTarget.id === id
+
+  const clearTitleEditState = (): void => {
+    setTitleEditTarget(null)
+    setTitleDraft('')
+    setTitleEditErrorMessage(null)
+  }
+
+  const startTitleEdit = (kind: TitleEditTargetKind, id: string, currentTitle: string): void => {
+    if (isSavingTitle) {
+      return
+    }
+
+    setTitleEditTarget({ kind, id })
+    setTitleDraft(currentTitle)
+    setTitleEditErrorMessage(null)
+  }
+
+  const cancelTitleEdit = (): void => {
+    if (isSavingTitle) {
+      return
+    }
+
+    clearTitleEditState()
+  }
+
+  const saveTitleEdit = async (): Promise<void> => {
+    if (titleEditTarget === null || isSavingTitle) {
+      return
+    }
+
+    const trimmedTitle = titleDraft.trim()
+
+    if (trimmedTitle.length === 0) {
+      setTitleEditErrorMessage(
+        titleEditTarget.kind === 'lesson' ? 'Enter a lesson title.' : 'Enter a quiz title.'
+      )
+      return
+    }
+
+    setIsSavingTitle(true)
+    setTitleEditErrorMessage(null)
+
+    try {
+      if (titleEditTarget.kind === 'lesson') {
+        const updatedLesson = await window.api.updateLessonTitle(titleEditTarget.id, trimmedTitle)
+
+        setLessons((currentLessons) => upsertLesson(currentLessons, updatedLesson))
+      } else {
+        const updatedQuiz = await window.api.updateQuizTitle(titleEditTarget.id, trimmedTitle)
+
+        setQuizzes((currentQuizzes) => upsertQuiz(currentQuizzes, updatedQuiz))
+        setActiveQuiz((currentQuiz) =>
+          currentQuiz?.quiz.id === updatedQuiz.id
+            ? { ...currentQuiz, quiz: updatedQuiz }
+            : currentQuiz
+        )
+        setQuizResult((currentResult) =>
+          currentResult?.quiz.id === updatedQuiz.id
+            ? { ...currentResult, quiz: updatedQuiz }
+            : currentResult
+        )
+      }
+
+      clearTitleEditState()
+    } catch (error) {
+      setTitleEditErrorMessage(getErrorMessage(error))
+    } finally {
+      setIsSavingTitle(false)
+    }
+  }
+
+  const handleTitleEditKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      void saveTitleEdit()
+      return
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      cancelTitleEdit()
+    }
+  }
+
+  const renderTitleEditForm = (kind: TitleEditTargetKind, inputId?: string): JSX.Element => (
+    <div className="title-edit-form">
+      <input
+        id={inputId}
+        className="title-edit-input"
+        type="text"
+        value={titleDraft}
+        onChange={(event) => {
+          setTitleDraft(event.currentTarget.value)
+        }}
+        onKeyDown={handleTitleEditKeyDown}
+        disabled={isSavingTitle}
+        aria-label={kind === 'lesson' ? 'Lesson title' : 'Quiz title'}
+        aria-invalid={titleEditErrorMessage !== null}
+        aria-describedby={titleEditErrorMessage === null ? undefined : 'title-edit-error'}
+        autoFocus
+      />
+      <div className="title-edit-actions">
+        <button
+          className="title-edit-action-button"
+          type="button"
+          onClick={() => {
+            void saveTitleEdit()
+          }}
+          disabled={isSavingTitle}
+        >
+          {isSavingTitle ? 'Saving...' : 'Save'}
+        </button>
+        <button
+          className="title-edit-action-button"
+          type="button"
+          onClick={cancelTitleEdit}
+          disabled={isSavingTitle}
+        >
+          Cancel
+        </button>
+      </div>
+      {titleEditErrorMessage !== null ? (
+        <p className="title-edit-error" id="title-edit-error" role="alert">
+          {titleEditErrorMessage}
+        </p>
+      ) : null}
+    </div>
+  )
+
   const openPdfPicker = async (): Promise<void> => {
     setIsImporting(true)
     setStatusMessage(null)
@@ -252,6 +395,7 @@ function App(): JSX.Element {
       setLessons((currentLessons) => upsertLesson(currentLessons, importedLesson))
       setActiveLessonId(importedLesson.id)
       setActiveAttemptHistoryQuizId(null)
+      clearTitleEditState()
       resetQuizTakingState()
 
       if (importedLesson.textExtractionStatus === 'failed') {
@@ -313,6 +457,7 @@ function App(): JSX.Element {
     setQuizErrorMessage(null)
     setQuizAttemptErrorMessage(null)
     setActiveAttemptHistoryQuizId(null)
+    clearTitleEditState()
     resetQuizTakingState()
   }
 
@@ -325,6 +470,7 @@ function App(): JSX.Element {
     setIsLoadingQuizAttempts(false)
     setQuizErrorMessage(null)
     setQuizAttemptErrorMessage(null)
+    clearTitleEditState()
     resetQuizTakingState()
   }
 
@@ -341,6 +487,7 @@ function App(): JSX.Element {
     setQuizTakingErrorMessage(null)
     setStatusMessage(null)
     setErrorMessage(null)
+    clearTitleEditState()
 
     try {
       const loadedQuiz = await window.api.getQuiz(quizId)
@@ -370,11 +517,13 @@ function App(): JSX.Element {
     setActiveAttemptHistoryQuizId(quizId)
     setStatusMessage(null)
     setErrorMessage(null)
+    clearTitleEditState()
     resetQuizTakingState()
   }
 
   const closeAttemptHistory = (): void => {
     setActiveAttemptHistoryQuizId(null)
+    clearTitleEditState()
     resetQuizTakingState()
   }
 
@@ -390,6 +539,7 @@ function App(): JSX.Element {
     setQuizTakingErrorMessage(null)
     setStatusMessage(null)
     setErrorMessage(null)
+    clearTitleEditState()
 
     try {
       const loadedResult = await window.api.getQuizAttemptResult(attemptId)
@@ -422,6 +572,7 @@ function App(): JSX.Element {
   }
 
   const closeQuizTaking = (): void => {
+    clearTitleEditState()
     resetQuizTakingState()
   }
 
@@ -580,9 +731,25 @@ function App(): JSX.Element {
                 <p className="detail-kicker">
                   {activeAttemptHistoryQuizId === null ? 'Quiz' : 'Attempt review'}
                 </p>
-                <h2 id="quiz-taking-heading">
-                  {activeQuiz?.quiz.title ?? activeAttemptHistoryQuiz?.title ?? 'Quiz'}
-                </h2>
+                {activeQuizTitleEditId !== null && isEditingTitle('quiz', activeQuizTitleEditId) ? (
+                  renderTitleEditForm('quiz', 'quiz-taking-heading')
+                ) : (
+                  <div className="title-display-row">
+                    <h2 id="quiz-taking-heading">{activeQuizTitle}</h2>
+                    {activeQuizTitleEditId !== null ? (
+                      <button
+                        className="title-edit-button"
+                        type="button"
+                        onClick={() => {
+                          startTitleEdit('quiz', activeQuizTitleEditId, activeQuizTitle)
+                        }}
+                        disabled={isSavingTitle}
+                      >
+                        Edit
+                      </button>
+                    ) : null}
+                  </div>
+                )}
                 {activeQuiz !== null ? (
                   <p>
                     {quizResult !== null && activeAttemptHistoryQuizId !== null
@@ -796,7 +963,27 @@ function App(): JSX.Element {
             <header className="attempt-history-header">
               <div className="detail-title-group">
                 <p className="detail-kicker">Attempt history</p>
-                <h2 id="attempt-history-heading">{activeAttemptHistoryQuiz.title}</h2>
+                {isEditingTitle('quiz', activeAttemptHistoryQuiz.id) ? (
+                  renderTitleEditForm('quiz', 'attempt-history-heading')
+                ) : (
+                  <div className="title-display-row">
+                    <h2 id="attempt-history-heading">{activeAttemptHistoryQuiz.title}</h2>
+                    <button
+                      className="title-edit-button"
+                      type="button"
+                      onClick={() => {
+                        startTitleEdit(
+                          'quiz',
+                          activeAttemptHistoryQuiz.id,
+                          activeAttemptHistoryQuiz.title
+                        )
+                      }}
+                      disabled={isSavingTitle}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                )}
                 <p>
                   {isLoadingQuizAttempts
                     ? 'Loading attempts'
@@ -843,35 +1030,61 @@ function App(): JSX.Element {
           <p className="empty-state">Import a PDF to create your first lesson.</p>
         ) : activeLesson === null ? (
           <ul className="lesson-list" aria-label="Imported lessons">
-            {lessons.map((lesson) => (
-              <li className="lesson-item" key={lesson.id}>
-                <button
-                  className="lesson-select-button"
-                  type="button"
-                  onClick={() => {
-                    openLessonDetail(lesson.id)
-                  }}
-                >
-                  <span>
-                    <span className="lesson-title-text">{lesson.title}</span>
-                    <span className="lesson-file-name">{lesson.originalFileName}</span>
-                    <span className="lesson-imported-date">
-                      Imported {formatDate(lesson.createdAt)}
-                    </span>
-                  </span>
-                </button>
-                <button
-                  className="delete-button"
-                  type="button"
-                  onClick={() => {
-                    void deleteLesson(lesson)
-                  }}
-                  disabled={deletingLessonIds.has(lesson.id)}
-                >
-                  {deletingLessonIds.has(lesson.id) ? 'Deleting...' : 'Delete'}
-                </button>
-              </li>
-            ))}
+            {lessons.map((lesson) => {
+              const isEditingLessonTitle = isEditingTitle('lesson', lesson.id)
+
+              return (
+                <li className="lesson-item" key={lesson.id}>
+                  {isEditingLessonTitle ? (
+                    <div className="lesson-title-edit-container">
+                      {renderTitleEditForm('lesson')}
+                      <span className="lesson-file-name">{lesson.originalFileName}</span>
+                      <span className="lesson-imported-date">
+                        Imported {formatDate(lesson.createdAt)}
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        className="lesson-select-button"
+                        type="button"
+                        onClick={() => {
+                          openLessonDetail(lesson.id)
+                        }}
+                      >
+                        <span>
+                          <span className="lesson-title-text">{lesson.title}</span>
+                          <span className="lesson-file-name">{lesson.originalFileName}</span>
+                          <span className="lesson-imported-date">
+                            Imported {formatDate(lesson.createdAt)}
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        className="title-edit-button"
+                        type="button"
+                        onClick={() => {
+                          startTitleEdit('lesson', lesson.id, lesson.title)
+                        }}
+                        disabled={isSavingTitle}
+                      >
+                        Edit
+                      </button>
+                    </>
+                  )}
+                  <button
+                    className="delete-button"
+                    type="button"
+                    onClick={() => {
+                      void deleteLesson(lesson)
+                    }}
+                    disabled={deletingLessonIds.has(lesson.id)}
+                  >
+                    {deletingLessonIds.has(lesson.id) ? 'Deleting...' : 'Delete'}
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         ) : (
           <section className="lesson-detail" aria-labelledby="lesson-detail-heading">
@@ -884,7 +1097,23 @@ function App(): JSX.Element {
             <header className="detail-header">
               <div className="detail-title-group">
                 <p className="detail-kicker">Lesson info</p>
-                <h2 id="lesson-detail-heading">{activeLesson.title}</h2>
+                {isEditingTitle('lesson', activeLesson.id) ? (
+                  renderTitleEditForm('lesson', 'lesson-detail-heading')
+                ) : (
+                  <div className="title-display-row">
+                    <h2 id="lesson-detail-heading">{activeLesson.title}</h2>
+                    <button
+                      className="title-edit-button"
+                      type="button"
+                      onClick={() => {
+                        startTitleEdit('lesson', activeLesson.id, activeLesson.title)
+                      }}
+                      disabled={isSavingTitle}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                )}
                 <p>{activeLesson.originalFileName}</p>
               </div>
               <div className="quiz-create-controls">
@@ -1026,28 +1255,56 @@ function App(): JSX.Element {
                 <ul className="quiz-list" aria-label="Saved quizzes">
                   {quizzes.map((quiz) => {
                     const quizAttemptsForQuiz = attemptsByQuizId.get(quiz.id) ?? []
+                    const isEditingQuizTitle = isEditingTitle('quiz', quiz.id)
 
                     return (
                       <li className="quiz-list-item" key={quiz.id}>
                         <div className="quiz-item-row">
-                          <button
-                            className="quiz-item"
-                            type="button"
-                            onClick={() => {
-                              void openQuizTaking(quiz.id)
-                            }}
-                          >
-                            <span>
-                              <span className="quiz-title">{quiz.title}</span>
-                              <span className="quiz-created">
-                                Created {formatDate(quiz.createdAt)}
-                              </span>
-                              <span className="quiz-metadata">
-                                <span>{formatQuizQuestionCount(quiz.questionCount)}</span>
-                                <span>{formatQuizDifficulty(quiz.difficulty)}</span>
-                              </span>
-                            </span>
-                          </button>
+                          {isEditingQuizTitle ? (
+                            <div className="quiz-item">
+                              <div className="quiz-title-edit-container">
+                                {renderTitleEditForm('quiz')}
+                                <span className="quiz-created">
+                                  Created {formatDate(quiz.createdAt)}
+                                </span>
+                                <span className="quiz-metadata">
+                                  <span>{formatQuizQuestionCount(quiz.questionCount)}</span>
+                                  <span>{formatQuizDifficulty(quiz.difficulty)}</span>
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="quiz-item">
+                              <button
+                                className="quiz-open-button"
+                                type="button"
+                                onClick={() => {
+                                  void openQuizTaking(quiz.id)
+                                }}
+                              >
+                                <span>
+                                  <span className="quiz-title">{quiz.title}</span>
+                                  <span className="quiz-created">
+                                    Created {formatDate(quiz.createdAt)}
+                                  </span>
+                                  <span className="quiz-metadata">
+                                    <span>{formatQuizQuestionCount(quiz.questionCount)}</span>
+                                    <span>{formatQuizDifficulty(quiz.difficulty)}</span>
+                                  </span>
+                                </span>
+                              </button>
+                              <button
+                                className="title-edit-button quiz-title-edit-button"
+                                type="button"
+                                onClick={() => {
+                                  startTitleEdit('quiz', quiz.id, quiz.title)
+                                }}
+                                disabled={isSavingTitle}
+                              >
+                                Edit
+                              </button>
+                            </div>
+                          )}
                           <button
                             className="history-button"
                             type="button"

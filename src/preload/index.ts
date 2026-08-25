@@ -27,12 +27,16 @@ interface QuizAnswerSubmission {
 const api = {
   importLessonPdf: (): Promise<LessonRecord | null> => ipcRenderer.invoke('lessons:importPdf'),
   listLessons: (): Promise<LessonRecord[]> => ipcRenderer.invoke('lessons:list'),
+  updateLessonTitle: (id: string, title: string): Promise<LessonRecord> =>
+    ipcRenderer.invoke('lessons:updateTitle', id, title),
   deleteLesson: (id: string): Promise<DeleteLessonResult> =>
     ipcRenderer.invoke('lessons:delete', id),
   createQuiz: (input: GenerateTemporaryQuizInput): Promise<FullQuiz> =>
     ipcRenderer.invoke('quizzes:create', input),
   listQuizzesForLesson: (lessonId: string): Promise<QuizRecord[]> =>
     ipcRenderer.invoke('quizzes:listForLesson', lessonId),
+  updateQuizTitle: (id: string, title: string): Promise<QuizRecord> =>
+    ipcRenderer.invoke('quizzes:updateTitle', id, title),
   listQuizAttemptsForLesson: (lessonId: string): Promise<QuizAttempt[]> =>
     ipcRenderer.invoke('quizzes:listAttemptsForLesson', lessonId),
   getQuiz: (quizId: string): Promise<FullQuiz | null> => ipcRenderer.invoke('quizzes:get', quizId),

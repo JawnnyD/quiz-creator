@@ -8,6 +8,7 @@ import {
   getLessonTextForQuizGenerationFromDatabase,
   importLessonPdfWithStorage,
   listLessonsFromDatabase,
+  updateLessonTitleFromDatabase,
   type LessonTextForQuizGeneration
 } from './service'
 
@@ -17,7 +18,8 @@ export {
   extractAndStoreLessonTextWithStorage,
   getLessonTextForQuizGenerationFromDatabase,
   importLessonPdfWithStorage,
-  listLessonsFromDatabase
+  listLessonsFromDatabase,
+  updateLessonTitleFromDatabase
 } from './service'
 
 export async function importLessonPdf(sourcePath: string): Promise<LessonRecord> {
@@ -26,6 +28,10 @@ export async function importLessonPdf(sourcePath: string): Promise<LessonRecord>
 
 export function listLessons(): LessonRecord[] {
   return listLessonsFromDatabase(initializeDatabase())
+}
+
+export function updateLessonTitle(lessonId: string, title: string): LessonRecord {
+  return updateLessonTitleFromDatabase(initializeDatabase(), lessonId, title)
 }
 
 export function deleteLesson(lessonId: string): DeleteLessonResult {

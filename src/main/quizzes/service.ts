@@ -245,6 +245,45 @@ export function listQuizzesForLessonFromDatabase(
   return rows.map(mapQuizRow)
 }
 
+export function updateQuizTitleFromDatabase(
+  connection: DatabaseSync,
+  quizId: string,
+  title: string
+): QuizRecord {
+  const normalizedQuizId = quizId.trim()
+  const normalizedTitle = title.trim()
+
+  if (normalizedQuizId.length === 0) {
+    throw new Error('Quiz id is required to update a quiz title')
+  }
+
+  if (normalizedTitle.length === 0) {
+    throw new Error('Quiz title is required')
+  }
+
+  if (findQuizById(connection, normalizedQuizId) === null) {
+    throw new Error(`Quiz was not found for title update: ${normalizedQuizId}`)
+  }
+
+  connection
+    .prepare(
+      `
+        UPDATE quizzes
+        SET title = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `
+    )
+    .run(normalizedTitle, normalizedQuizId)
+
+  const updatedQuiz = findQuizById(connection, normalizedQuizId)
+
+  if (updatedQuiz === null) {
+    throw new Error(`Updated quiz was not found after title update: ${normalizedQuizId}`)
+  }
+
+  return updatedQuiz
+}
+
 export function listQuizAttemptsForLessonFromDatabase(
   connection: DatabaseSync,
   lessonId: string

@@ -7,6 +7,7 @@ import {
   deleteLesson,
   importLessonPdf,
   listLessons,
+  updateLessonTitle,
   type DeleteLessonResult,
   type LessonRecord
 } from './lessons'
@@ -17,6 +18,7 @@ import {
   loadFullQuiz,
   loadQuizAttemptResult,
   submitQuizAttempt,
+  updateQuizTitle,
   type FullQuiz,
   type GenerateTemporaryQuizInput,
   type QuizAnswerSubmission,
@@ -117,6 +119,15 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('lessons:updateTitle', (_, lessonId: string, title: string): LessonRecord => {
+    try {
+      return updateLessonTitle(lessonId, title)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to update lesson title: ${message}`)
+    }
+  })
+
   ipcMain.handle('lessons:delete', (_, lessonId: string): DeleteLessonResult => {
     try {
       return deleteLesson(lessonId)
@@ -141,6 +152,15 @@ app.whenReady().then(() => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`Unable to load quizzes: ${message}`)
+    }
+  })
+
+  ipcMain.handle('quizzes:updateTitle', (_, quizId: string, title: string): QuizRecord => {
+    try {
+      return updateQuizTitle(quizId, title)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Unable to update quiz title: ${message}`)
     }
   })
 

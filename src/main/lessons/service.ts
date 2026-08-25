@@ -154,6 +154,45 @@ export function listLessonsFromDatabase(connection: DatabaseSync): LessonRecord[
   return rows.map(mapLessonRow)
 }
 
+export function updateLessonTitleFromDatabase(
+  connection: DatabaseSync,
+  lessonId: string,
+  title: string
+): LessonRecord {
+  const normalizedLessonId = lessonId.trim()
+  const normalizedTitle = title.trim()
+
+  if (normalizedLessonId.length === 0) {
+    throw new Error('Lesson id is required to update a lesson title')
+  }
+
+  if (normalizedTitle.length === 0) {
+    throw new Error('Lesson title is required')
+  }
+
+  if (findLessonById(connection, normalizedLessonId) === null) {
+    throw new Error(`Lesson was not found for title update: ${normalizedLessonId}`)
+  }
+
+  connection
+    .prepare(
+      `
+        UPDATE lessons
+        SET title = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `
+    )
+    .run(normalizedTitle, normalizedLessonId)
+
+  const updatedLesson = findLessonById(connection, normalizedLessonId)
+
+  if (updatedLesson === null) {
+    throw new Error(`Updated lesson was not found after title update: ${normalizedLessonId}`)
+  }
+
+  return updatedLesson
+}
+
 export async function extractAndStoreLessonTextWithStorage(
   connection: DatabaseSync,
   storageRootPath: string,
