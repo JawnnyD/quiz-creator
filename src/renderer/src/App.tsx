@@ -752,7 +752,15 @@ function App(): JSX.Element {
                           ? `${answeredQuestionCount} of ${activeQuiz.questions.length} answered`
                           : 'Attempt submitted'}
                   </p>
-                  {!isViewingStoredAttemptResult ? (
+                  {quizResult !== null ? (
+                    <button
+                      className="back-button quiz-bottom-back-button"
+                      type="button"
+                      onClick={closeQuizTaking}
+                    >
+                      Back
+                    </button>
+                  ) : !isViewingStoredAttemptResult ? (
                     <button
                       className="upload-button submit-quiz-button"
                       type="button"

@@ -881,6 +881,10 @@ body {
   min-width: 156px;
 }
 
+.quiz-bottom-back-button {
+  min-width: 156px;
+}
+
 @media (max-width: 640px) {
   .app {
     padding: 16px;
@@ -957,6 +961,10 @@ body {
   }
 
   .submit-quiz-button {
+    width: 100%;
+  }
+
+  .quiz-bottom-back-button {
     width: 100%;
   }
 }
