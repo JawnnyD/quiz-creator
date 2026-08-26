@@ -1,3 +1,4 @@
+import { randomInt } from 'crypto'
 import OpenAI from 'openai'
 import type { DatabaseSync } from 'node:sqlite'
 
@@ -162,7 +163,9 @@ async function generateQuizWithOpenAi(
     throw new Error('OpenAI quiz generation returned an empty response')
   }
 
-  return validateGeneratedQuiz(parseGeneratedQuizJson(responseText), settings)
+  const generatedQuiz = validateGeneratedQuiz(parseGeneratedQuizJson(responseText), settings)
+
+  return randomizeGeneratedQuizChoices(generatedQuiz)
 }
 
 function getOpenAiClient(): OpenAI {
@@ -218,6 +221,7 @@ Each question must:
 - Avoid trick wording, vague clues, or unsupported assumptions.
 - Test understanding rather than simple word matching when possible.
 - Match the selected difficulty level.
+- Vary answer choice order across questions and avoid predictable correct-answer positions.
 - Be clinically and scientifically accurate.`
 
 function getDifficultyPrompt(settings: NormalizedQuizSettings): string {
@@ -381,6 +385,37 @@ function validateGeneratedQuiz(value: unknown, settings: NormalizedQuizSettings)
     title,
     questions
   }
+}
+
+function randomizeGeneratedQuizChoices(quiz: GeneratedQuiz): GeneratedQuiz {
+  return {
+    ...quiz,
+    questions: quiz.questions.map((question) => ({
+      ...question,
+      choices: shuffleChoices(question.choices)
+    }))
+  }
+}
+
+function shuffleChoices(
+  choices: SaveQuizQuestionInput['choices']
+): SaveQuizQuestionInput['choices'] {
+  const shuffledChoices = [...choices]
+
+  for (let index = shuffledChoices.length - 1; index > 0; index -= 1) {
+    const randomIndex = randomInt(index + 1)
+    const currentChoice = shuffledChoices[index]
+    const randomChoice = shuffledChoices[randomIndex]
+
+    if (currentChoice === undefined || randomChoice === undefined) {
+      throw new Error('Unable to randomize generated quiz choices')
+    }
+
+    shuffledChoices[index] = randomChoice
+    shuffledChoices[randomIndex] = currentChoice
+  }
+
+  return shuffledChoices
 }
 
 function validateGeneratedQuestion(
