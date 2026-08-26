@@ -178,7 +178,7 @@ function getOpenAiClient(): OpenAI {
 }
 
 function getModelForDifficulty(difficulty: QuizDifficulty): string {
-  return difficulty === 'easy' ? easyModel : advancedModel
+  return difficulty === 'nbme' ? advancedModel : easyModel
 }
 
 function buildGeneratorInstructions(settings: NormalizedQuizSettings): string {

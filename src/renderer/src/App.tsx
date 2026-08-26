@@ -17,9 +17,9 @@ const maxQuestionCount = 50
 const questionCountSliderStep = 5
 
 const difficultyOptions = [
-  { id: 'easy', label: 'Easy', description: '' },
-  { id: 'nbme', label: 'NBME', description: '' },
-  { id: 'custom', label: 'Custom', description: 'Define your own rules for the quiz.' }
+  { id: 'easy', label: 'Easy', description: 'Recall and basic understanding.' },
+  { id: 'nbme', label: 'NBME', description: 'Clinical reasoning and application.' },
+  { id: 'custom', label: 'Custom', description: 'Define your own rules.' }
 ] as const satisfies ReadonlyArray<{
   id: QuizDifficulty
   label: string
