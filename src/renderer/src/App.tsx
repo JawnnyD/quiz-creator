@@ -209,7 +209,6 @@ function App(): JSX.Element {
     activeQuiz !== null || isLoadingActiveQuiz || quizTakingErrorMessage !== null
   const isViewingStoredAttemptResult = activeAttemptHistoryQuizId !== null && quizResult !== null
   const activeQuizTitle = activeQuiz?.quiz.title ?? activeAttemptHistoryQuiz?.title ?? 'Quiz'
-  const activeQuizTitleEditId = activeQuiz?.quiz.id ?? activeAttemptHistoryQuiz?.id ?? null
   const answeredQuestionCount =
     activeQuiz?.questions.filter(
       (question) => selectedChoiceIdsByQuestionId[question.id] !== undefined
@@ -731,25 +730,7 @@ function App(): JSX.Element {
                 <p className="detail-kicker">
                   {activeAttemptHistoryQuizId === null ? 'Quiz' : 'Attempt review'}
                 </p>
-                {activeQuizTitleEditId !== null && isEditingTitle('quiz', activeQuizTitleEditId) ? (
-                  renderTitleEditForm('quiz', 'quiz-taking-heading')
-                ) : (
-                  <div className="title-display-row">
-                    <h2 id="quiz-taking-heading">{activeQuizTitle}</h2>
-                    {activeQuizTitleEditId !== null ? (
-                      <button
-                        className="title-edit-button"
-                        type="button"
-                        onClick={() => {
-                          startTitleEdit('quiz', activeQuizTitleEditId, activeQuizTitle)
-                        }}
-                        disabled={isSavingTitle}
-                      >
-                        Edit
-                      </button>
-                    ) : null}
-                  </div>
-                )}
+                <h2 id="quiz-taking-heading">{activeQuizTitle}</h2>
                 {activeQuiz !== null ? (
                   <p>
                     {quizResult !== null && activeAttemptHistoryQuizId !== null
@@ -963,27 +944,7 @@ function App(): JSX.Element {
             <header className="attempt-history-header">
               <div className="detail-title-group">
                 <p className="detail-kicker">Attempt history</p>
-                {isEditingTitle('quiz', activeAttemptHistoryQuiz.id) ? (
-                  renderTitleEditForm('quiz', 'attempt-history-heading')
-                ) : (
-                  <div className="title-display-row">
-                    <h2 id="attempt-history-heading">{activeAttemptHistoryQuiz.title}</h2>
-                    <button
-                      className="title-edit-button"
-                      type="button"
-                      onClick={() => {
-                        startTitleEdit(
-                          'quiz',
-                          activeAttemptHistoryQuiz.id,
-                          activeAttemptHistoryQuiz.title
-                        )
-                      }}
-                      disabled={isSavingTitle}
-                    >
-                      Edit
-                    </button>
-                  </div>
-                )}
+                <h2 id="attempt-history-heading">{activeAttemptHistoryQuiz.title}</h2>
                 <p>
                   {isLoadingQuizAttempts
                     ? 'Loading attempts'
@@ -1119,7 +1080,7 @@ function App(): JSX.Element {
               <div className="quiz-create-controls">
                 <div className="quiz-create-top-row">
                   <div className="quiz-question-setting">
-                    <span className="quiz-setting-label">Questions</span>
+                    <span className="quiz-setting-label"># of Questions</span>
                     <div className="quiz-question-count-controls">
                       <input
                         className="quiz-question-count-slider"
@@ -1137,18 +1098,16 @@ function App(): JSX.Element {
                         }
                       />
                       <label className="quiz-question-count-number">
-                        <span>Count</span>
                         <input
                           className="quiz-question-count-input"
-                          type="number"
-                          min={minQuestionCount}
-                          max={maxQuestionCount}
-                          step="1"
+                          type="text"
                           inputMode="numeric"
+                          pattern="[0-9]*"
                           value={questionCountInput}
                           onChange={(event) => {
                             setQuestionCountInput(event.currentTarget.value)
                           }}
+                          aria-label="Question count"
                           aria-invalid={questionCountErrorMessage !== null}
                           aria-describedby={
                             questionCountErrorMessage === null ? undefined : 'question-count-error'
