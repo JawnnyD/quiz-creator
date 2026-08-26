@@ -790,7 +790,7 @@ function App(): JSX.Element {
                       (choice) => choice.id === selectedChoiceId
                     )
                     const correctChoice = question.choices.find((choice) => choice.isCorrect)
-                    const reviewContent = getQuestionReviewContent(question.explanation)
+                    const explanationText = getQuestionExplanationText(question.explanation)
                     const isTutorModeQuestionFeedbackVisible =
                       quizResult === null && isTutorModeEnabled && selectedChoice !== undefined
                     const isQuestionFeedbackVisible =
@@ -880,14 +880,7 @@ function App(): JSX.Element {
 
                             <div className="quiz-result-block">
                               <h4>Explanation</h4>
-                              <p>{reviewContent.explanationText ?? 'No explanation available.'}</p>
-                            </div>
-
-                            <div className="quiz-result-block">
-                              <h4>Lesson reference</h4>
-                              <p>
-                                {reviewContent.lessonReference ?? 'Lesson reference unavailable.'}
-                              </p>
+                              <p>{explanationText ?? 'No explanation available.'}</p>
                             </div>
                           </div>
                         ) : null}
@@ -1446,33 +1439,14 @@ function getQuestionCountSliderValue(value: string): number {
   return Math.min(Math.max(parsedValue, minQuestionCount), maxQuestionCount)
 }
 
-function getQuestionReviewContent(explanation: string | null): {
-  explanationText: string | null
-  lessonReference: string | null
-} {
+function getQuestionExplanationText(explanation: string | null): string | null {
   const trimmedExplanation = explanation?.trim() ?? ''
-  const sourceExcerptPrefix = 'Source excerpt:'
 
   if (trimmedExplanation.length === 0) {
-    return {
-      explanationText: null,
-      lessonReference: null
-    }
+    return null
   }
 
-  if (trimmedExplanation.toLowerCase().startsWith(sourceExcerptPrefix.toLowerCase())) {
-    const lessonReference = trimmedExplanation.slice(sourceExcerptPrefix.length).trim()
-
-    return {
-      explanationText: null,
-      lessonReference: lessonReference.length > 0 ? lessonReference : null
-    }
-  }
-
-  return {
-    explanationText: trimmedExplanation,
-    lessonReference: null
-  }
+  return trimmedExplanation
 }
 
 function getErrorMessage(error: unknown): string {
