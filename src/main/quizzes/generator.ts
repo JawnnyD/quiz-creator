@@ -278,23 +278,30 @@ function buildCustomPrompt(customDifficultyInstructions: string): string {
 
   return `Difficulty: Custom
 
-Create practice questions according to the user's custom instructions while still following the general medical question-writing standards.
+Create straightforward practice questions that follow the general style and structure of Easy questions, while focusing on the user's requested topic, section, lesson area, or custom instructions.
 
 User custom instructions:
 ${instructions}
 
-Apply the user's requested difficulty, style, focus areas, and question format unless they conflict with accuracy, the uploaded document, or safe medical education standards.
+Question style:
+- Use short to moderate-length stems.
+- Focus on recall, recognition, basic understanding, and simple application.
+- Prioritize the specific section, topic, learning objective, or part of the lesson requested by the user.
+- Clinical context may be used when helpful, but it should remain simple and not require complex multi-step reasoning.
+- Avoid long NBME-style vignettes unless the user explicitly requests board-style or clinical vignette questions.
+- Avoid complex lab interpretation, competing diagnoses, or advanced integration unless specifically requested.
 
-If the custom instructions are vague, infer the intended difficulty as follows:
-- If the user asks for basic, simple, beginner, recall, or first-pass questions, use Easy-style questions.
-- If the user asks for board-style, NBME-style, USMLE-style, hard, clinical vignette, or application-based questions, use NBME-style questions.
-- If the user asks for mixed difficulty, include a balanced range from recall to advanced application.
+Distractors:
+- Should be plausible but clearly distinguishable from the correct answer.
+- Should test common misunderstandings, closely related terms, or nearby concepts from the requested section.
+- Avoid obscure, overly advanced, or throwaway answer choices.
 
-Always preserve:
-- One best answer.
-- 5 answer choices.
-- Plausible distractors.
-- Alignment with the uploaded document and learning objectives.`
+If the user's custom instructions are vague:
+- Treat the request as Easy-style by default.
+- Focus on the most relevant learning objectives from the uploaded document.
+- Keep the questions simple, direct, and useful for first-pass review.
+
+The goal is to let the learner target a specific part of the lesson while keeping the difficulty approachable and focused.`
 }
 
 function buildGeneratedQuizSchema(): { [key: string]: unknown } {
