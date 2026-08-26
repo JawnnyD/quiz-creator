@@ -1,7 +1,11 @@
+import OpenAI from 'openai'
 import type { DatabaseSync } from 'node:sqlite'
 
-import type { QuizCreationSettings } from '../../shared/quizzes'
-import { getLessonTextForQuizGenerationFromDatabase } from '../lessons/service'
+import type { QuizCreationSettings, QuizDifficulty } from '../../shared/quizzes'
+import {
+  getLessonTextForQuizGenerationFromDatabase,
+  type LessonTextForQuizGeneration
+} from '../lessons/service'
 import {
   createQuizRecordFromDatabase,
   loadFullQuizFromDatabase,
@@ -10,47 +14,21 @@ import {
   type SaveQuizQuestionInput
 } from './service'
 
-const defaultQuizTitle = 'Temporary Quiz'
+const defaultQuizTitle = 'Medical Practice Quiz'
 const maxTemporaryQuizQuestionCount = 50
-const defaultQuizSettings: QuizCreationSettings = {
+const requiredChoicesPerQuestion = 5
+const easyModel = 'gpt-5.6-luna'
+const advancedModel = 'gpt-5.6-terra'
+const openAiApiKeyEnvironmentVariableName = 'OPENAI_API_KEY'
+
+const defaultQuizSettings = {
   questionCount: 10,
-  choicesPerQuestion: 4
-}
-const fallbackDistractors = [
-  'overview',
-  'definition',
-  'example',
-  'process',
-  'summary',
-  'context',
-  'evidence',
-  'result',
-  'method',
-  'detail'
-]
-const stopWords = new Set([
-  'the',
-  'and',
-  'for',
-  'are',
-  'but',
-  'not',
-  'you',
-  'with',
-  'that',
-  'this',
-  'from',
-  'have',
-  'has',
-  'was',
-  'were',
-  'will',
-  'their',
-  'there',
-  'which',
-  'when',
-  'what'
-])
+  choicesPerQuestion: requiredChoicesPerQuestion,
+  difficulty: 'easy',
+  customDifficultyInstructions: ''
+} satisfies NormalizedQuizSettings
+
+let openAiClient: OpenAI | null = null
 
 export interface GenerateTemporaryQuizInput {
   lessonId: string
@@ -58,15 +36,22 @@ export interface GenerateTemporaryQuizInput {
   settings?: Partial<QuizCreationSettings>
 }
 
-interface SourceExcerpt {
-  text: string
-  keywords: string[]
+interface NormalizedQuizSettings {
+  questionCount: number
+  choicesPerQuestion: number
+  difficulty: QuizDifficulty
+  customDifficultyInstructions: string
 }
 
-export function generateTemporaryQuizFromLessonTextFromDatabase(
+interface GeneratedQuiz {
+  title: string
+  questions: SaveQuizQuestionInput[]
+}
+
+export async function generateTemporaryQuizFromLessonTextFromDatabase(
   connection: DatabaseSync,
   input: GenerateTemporaryQuizInput
-): FullQuiz {
+): Promise<FullQuiz> {
   const lessonId = input.lessonId.trim()
 
   if (lessonId.length === 0) {
@@ -80,24 +65,22 @@ export function generateTemporaryQuizFromLessonTextFromDatabase(
     throw new Error(`Completed lesson text was not found for quiz generation: ${lessonId}`)
   }
 
-  const fullText = normalizeWhitespace(lessonText.fullText)
-
-  if (fullText.length === 0) {
+  if (normalizeWhitespace(lessonText.fullText).length === 0) {
     throw new Error(`Lesson text is empty for quiz generation: ${lessonId}`)
   }
 
-  const title = input.title?.trim() || defaultQuizTitle
-  const questions = generateTemporaryQuestions(fullText, settings)
+  const generatedQuiz = await generateQuizWithOpenAi(lessonText, settings)
+  const title = input.title?.trim() || generatedQuiz.title || defaultQuizTitle
   const quiz = createQuizRecordFromDatabase(connection, {
     lessonId,
     title,
-    ...(settings.difficulty === undefined ? {} : { difficulty: settings.difficulty })
+    difficulty: settings.difficulty
   })
 
   try {
     saveQuizQuestionsFromDatabase(connection, {
       quizId: quiz.id,
-      questions
+      questions: generatedQuiz.questions
     })
   } catch (error) {
     cleanupGeneratedQuiz(connection, quiz.id)
@@ -115,9 +98,11 @@ export function generateTemporaryQuizFromLessonTextFromDatabase(
 
 function normalizeQuizSettings(
   settings: Partial<QuizCreationSettings> | undefined
-): QuizCreationSettings {
+): NormalizedQuizSettings {
   const questionCount = settings?.questionCount ?? defaultQuizSettings.questionCount
   const choicesPerQuestion = settings?.choicesPerQuestion ?? defaultQuizSettings.choicesPerQuestion
+  const difficulty = settings?.difficulty ?? defaultQuizSettings.difficulty
+  const customDifficultyInstructions = settings?.customDifficultyInstructions?.trim() ?? ''
 
   if (!Number.isInteger(questionCount) || questionCount <= 0) {
     throw new Error('Temporary quiz question count must be a positive integer')
@@ -127,200 +112,420 @@ function normalizeQuizSettings(
     throw new Error(`Temporary quiz question count cannot exceed ${maxTemporaryQuizQuestionCount}`)
   }
 
-  if (!Number.isInteger(choicesPerQuestion) || choicesPerQuestion < 2) {
-    throw new Error('Temporary quiz choices per question must be an integer of at least 2')
+  if (!Number.isInteger(choicesPerQuestion) || choicesPerQuestion !== requiredChoicesPerQuestion) {
+    throw new Error(`AI-generated quizzes must use exactly ${requiredChoicesPerQuestion} choices`)
   }
 
-  const normalizedSettings: QuizCreationSettings = {
+  if (difficulty !== 'easy' && difficulty !== 'nbme' && difficulty !== 'custom') {
+    throw new Error(`Unsupported quiz difficulty: ${String(difficulty)}`)
+  }
+
+  return {
     questionCount,
-    choicesPerQuestion
+    choicesPerQuestion,
+    difficulty,
+    customDifficultyInstructions
   }
-
-  if (settings?.difficulty !== undefined) {
-    normalizedSettings.difficulty = settings.difficulty
-  }
-
-  return normalizedSettings
 }
 
-function generateTemporaryQuestions(
-  lessonText: string,
-  settings: QuizCreationSettings
-): SaveQuizQuestionInput[] {
-  const keywords = extractKeywordCandidates(lessonText)
-
-  if (keywords.length === 0) {
-    throw new Error('Lesson text does not contain usable words for quiz generation')
-  }
-
-  const sourceExcerpts = buildSourceExcerpts(lessonText)
-  const sourcesWithKeywords = sourceExcerpts.filter((source) => source.keywords.length > 0)
-
-  if (sourcesWithKeywords.length === 0) {
-    throw new Error('Lesson text does not contain usable excerpts for quiz generation')
-  }
-
-  return Array.from({ length: settings.questionCount }, (_, questionIndex) => {
-    const source = sourcesWithKeywords[questionIndex % sourcesWithKeywords.length]
-    const correctChoice = source.keywords[questionIndex % source.keywords.length]
-    const promptExcerpt = replaceKeywordWithBlank(source.text, correctChoice)
-
-    return {
-      prompt: `Question ${questionIndex + 1}: Complete the excerpt: "${promptExcerpt}"`,
-      explanation: `Source excerpt: ${source.text}`,
-      choices: buildChoices(correctChoice, keywords, questionIndex, settings.choicesPerQuestion)
-    }
-  })
-}
-
-function buildSourceExcerpts(lessonText: string): SourceExcerpt[] {
-  const sentenceMatches = lessonText.match(/[^.!?]+[.!?]?/g) ?? [lessonText]
-  const excerpts = sentenceMatches
-    .map((sentence) => truncateText(normalizeWhitespace(sentence), 180))
-    .filter((sentence) => sentence.length > 0)
-
-  return (excerpts.length > 0 ? excerpts : [truncateText(lessonText, 180)]).map((text) => ({
-    text,
-    keywords: extractKeywordCandidates(text)
-  }))
-}
-
-function buildChoices(
-  correctChoice: string,
-  allKeywords: string[],
-  questionIndex: number,
-  choicesPerQuestion: number
-): SaveQuizQuestionInput['choices'] {
-  const correctChoiceKey = normalizeChoiceKey(correctChoice)
-  const usedChoiceKeys = new Set([correctChoiceKey])
-  const distractors: string[] = []
-  const rotatedKeywords = [
-    ...allKeywords.slice(questionIndex + 1),
-    ...allKeywords.slice(0, questionIndex + 1)
-  ]
-
-  for (const keyword of rotatedKeywords) {
-    addDistractor(keyword, usedChoiceKeys, distractors, choicesPerQuestion - 1)
-  }
-
-  let fallbackRound = 0
-
-  while (distractors.length < choicesPerQuestion - 1) {
-    for (const fallback of fallbackDistractors) {
-      const candidate = fallbackRound === 0 ? fallback : `${fallback} ${fallbackRound + 1}`
-
-      addDistractor(candidate, usedChoiceKeys, distractors, choicesPerQuestion - 1)
-
-      if (distractors.length === choicesPerQuestion - 1) {
-        break
+async function generateQuizWithOpenAi(
+  lessonText: LessonTextForQuizGeneration,
+  settings: NormalizedQuizSettings
+): Promise<GeneratedQuiz> {
+  const client = getOpenAiClient()
+  const response = await client.responses.create({
+    model: getModelForDifficulty(settings.difficulty),
+    instructions: buildGeneratorInstructions(settings),
+    input: buildGeneratorInput(lessonText, settings),
+    max_output_tokens: getMaxOutputTokens(settings.questionCount),
+    store: false,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'medical_practice_quiz',
+        strict: true,
+        schema: buildGeneratedQuizSchema()
       }
     }
+  })
 
-    fallbackRound += 1
+  if (response.status !== 'completed') {
+    const reason =
+      response.error?.message ?? response.incomplete_details?.reason ?? 'Unknown completion status'
+
+    throw new Error(`OpenAI quiz generation did not complete: ${reason}`)
   }
 
-  const correctChoiceIndex = questionIndex % choicesPerQuestion
-  const choices: SaveQuizQuestionInput['choices'] = []
+  const responseText = response.output_text.trim()
 
-  for (let choiceIndex = 0; choiceIndex < choicesPerQuestion; choiceIndex += 1) {
-    if (choiceIndex === correctChoiceIndex) {
-      choices.push({
-        choiceText: correctChoice,
-        isCorrect: true
-      })
-    } else {
-      choices.push({
-        choiceText: distractors.shift() ?? fallbackDistractors[0],
-        isCorrect: false
-      })
-    }
+  if (responseText.length === 0) {
+    throw new Error('OpenAI quiz generation returned an empty response')
   }
 
-  return choices
+  return validateGeneratedQuiz(parseGeneratedQuizJson(responseText), settings)
 }
 
-function addDistractor(
-  candidate: string,
-  usedChoiceKeys: Set<string>,
-  distractors: string[],
-  desiredDistractorCount: number
-): void {
-  if (distractors.length >= desiredDistractorCount) {
-    return
+function getOpenAiClient(): OpenAI {
+  const apiKey = process.env[openAiApiKeyEnvironmentVariableName]?.trim()
+
+  if (apiKey === undefined || apiKey.length === 0) {
+    throw new Error(`${openAiApiKeyEnvironmentVariableName} is required to generate quizzes`)
   }
 
-  const trimmedCandidate = candidate.trim()
+  openAiClient ??= new OpenAI({ apiKey })
 
-  if (trimmedCandidate.length === 0) {
-    return
-  }
-
-  const choiceKey = normalizeChoiceKey(trimmedCandidate)
-
-  if (usedChoiceKeys.has(choiceKey)) {
-    return
-  }
-
-  distractors.push(trimmedCandidate)
-  usedChoiceKeys.add(choiceKey)
+  return openAiClient
 }
 
-function extractKeywordCandidates(text: string): string[] {
-  const words = text.match(/[A-Za-z0-9][A-Za-z0-9'-]*/g) ?? []
-  const preferredWords = uniqueWords(
-    words.filter((word) => word.length >= 3 && !stopWords.has(word.toLowerCase()))
+function getModelForDifficulty(difficulty: QuizDifficulty): string {
+  return difficulty === 'easy' ? easyModel : advancedModel
+}
+
+function buildGeneratorInstructions(settings: NormalizedQuizSettings): string {
+  return `${sharedBasePrompt}
+
+${getDifficultyPrompt(settings)}`
+}
+
+function buildGeneratorInput(
+  lessonText: LessonTextForQuizGeneration,
+  settings: NormalizedQuizSettings
+): string {
+  return `Treat the extracted lesson text below as the uploaded document.
+
+Settings:
+- Requested questions: ${settings.questionCount}
+- Answer choices per question: ${settings.choicesPerQuestion}
+- Difficulty: ${settings.difficulty}
+
+Extracted lesson text:
+<lesson_text>
+${formatLessonTextForPrompt(lessonText)}
+</lesson_text>`
+}
+
+const sharedBasePrompt = `You are a medical education question writer creating practice questions for USMLE Step 1-style learning.
+
+Use the uploaded document as the primary factual source. Do not introduce unsupported facts from outside the document unless they are necessary basic medical knowledge for framing a question. Prioritize the document's learning objectives, high-yield concepts, and clinically relevant details.
+
+Generate the number of questions requested by the user.
+
+Each question must:
+
+- Have one best answer.
+- Include 5 answer choices.
+- Use plausible distractors.
+- Avoid trick wording, vague clues, or unsupported assumptions.
+- Test understanding rather than simple word matching when possible.
+- Match the selected difficulty level.
+- Be clinically and scientifically accurate.`
+
+function getDifficultyPrompt(settings: NormalizedQuizSettings): string {
+  switch (settings.difficulty) {
+    case 'easy':
+      return easyPrompt
+    case 'nbme':
+      return nbmePrompt
+    case 'custom':
+      return buildCustomPrompt(settings.customDifficultyInstructions)
+  }
+}
+
+const easyPrompt = `Difficulty: Easy
+
+Create straightforward practice questions focused on recall, recognition, and basic understanding of the uploaded document.
+
+Question style:
+- Short to moderate-length stems.
+- Ask about definitions, mechanisms, classic associations, key facts, simple cause-effect relationships, or direct application of a concept.
+- Clinical context may be used, but it should be simple and not require multi-step reasoning.
+- Avoid long vignettes, complex lab interpretation, or competing diagnoses.
+
+Distractors:
+- Should be plausible but clearly distinguishable from the correct answer.
+- Should test common misunderstandings or closely related concepts.
+- Avoid overly obscure answer choices.
+
+The goal is to help the learner confirm that they understand the core material before moving to harder application questions.`
+
+const nbmePrompt = `Difficulty: NBME
+
+Create USMLE Step 1-style questions modeled after NBME-style clinical reasoning.
+
+Question style:
+- Use full clinical vignette stems when appropriate.
+- Include patient demographics, relevant history, physical exam findings, labs, imaging, pathology, or experimental findings when useful.
+- Require application, integration, or multi-step reasoning rather than direct recall.
+- Focus on mechanisms, diagnosis, pathophysiology, pharmacology, microbiology, immunology, biochemistry, genetics, physiology, pathology, or behavioral science as supported by the document.
+- The correct answer should be the best answer, not merely a true statement.
+
+Distractors:
+- Must be medically plausible.
+- Should reflect common diagnostic confusions, mechanism errors, similar diseases, similar drugs, or related pathways.
+- Avoid obviously wrong or throwaway options.
+
+Question quality requirements:
+- Do not make the vignette longer than necessary.
+- Include only details that help discriminate the correct answer from distractors.
+- Avoid copying wording directly from the source document when possible.
+- Maintain balanced coverage across the document, with emphasis on learning objectives and high-yield concepts.`
+
+function buildCustomPrompt(customDifficultyInstructions: string): string {
+  const instructions =
+    customDifficultyInstructions.length > 0
+      ? customDifficultyInstructions
+      : 'No custom instructions were provided. Create balanced practice questions using the general medical question-writing standards.'
+
+  return `Difficulty: Custom
+
+Create practice questions according to the user's custom instructions while still following the general medical question-writing standards.
+
+User custom instructions:
+${instructions}
+
+Apply the user's requested difficulty, style, focus areas, and question format unless they conflict with accuracy, the uploaded document, or safe medical education standards.
+
+If the custom instructions are vague, infer the intended difficulty as follows:
+- If the user asks for basic, simple, beginner, recall, or first-pass questions, use Easy-style questions.
+- If the user asks for board-style, NBME-style, USMLE-style, hard, clinical vignette, or application-based questions, use NBME-style questions.
+- If the user asks for mixed difficulty, include a balanced range from recall to advanced application.
+
+Always preserve:
+- One best answer.
+- 5 answer choices.
+- Plausible distractors.
+- Alignment with the uploaded document and learning objectives.`
+}
+
+function buildGeneratedQuizSchema(): { [key: string]: unknown } {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      title: {
+        type: 'string',
+        description: 'A concise title for the generated quiz.'
+      },
+      questions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            prompt: {
+              type: 'string',
+              description: 'The full question stem.'
+            },
+            explanation: {
+              type: 'string',
+              description: 'A concise explanation of why the correct answer is best.'
+            },
+            choices: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  choiceText: {
+                    type: 'string',
+                    description: 'The answer choice text.'
+                  },
+                  isCorrect: {
+                    type: 'boolean',
+                    description: 'True only for the one best answer.'
+                  }
+                },
+                required: ['choiceText', 'isCorrect']
+              }
+            }
+          },
+          required: ['prompt', 'explanation', 'choices']
+        }
+      }
+    },
+    required: ['title', 'questions']
+  }
+}
+
+function validateGeneratedQuiz(value: unknown, settings: NormalizedQuizSettings): GeneratedQuiz {
+  if (!isRecord(value)) {
+    throw new Error('OpenAI quiz generation returned an invalid quiz object')
+  }
+
+  const title = getRequiredString(value, 'title', 'Generated quiz title')
+  const questionsValue = value['questions']
+
+  if (!Array.isArray(questionsValue)) {
+    throw new Error('OpenAI quiz generation did not return a questions array')
+  }
+
+  if (questionsValue.length !== settings.questionCount) {
+    throw new Error(
+      `OpenAI quiz generation returned ${questionsValue.length} questions instead of ${settings.questionCount}`
+    )
+  }
+
+  const questionPrompts = new Set<string>()
+  const questions = questionsValue.map((questionValue, questionIndex) =>
+    validateGeneratedQuestion(questionValue, questionIndex, settings, questionPrompts)
   )
 
-  if (preferredWords.length > 0) {
-    return preferredWords
+  return {
+    title,
+    questions
   }
-
-  return uniqueWords(words)
 }
 
-function uniqueWords(words: string[]): string[] {
-  const seenWords = new Set<string>()
-  const unique: string[] = []
+function validateGeneratedQuestion(
+  value: unknown,
+  questionIndex: number,
+  settings: NormalizedQuizSettings,
+  questionPrompts: Set<string>
+): SaveQuizQuestionInput {
+  if (!isRecord(value)) {
+    throw new Error(`Generated question ${questionIndex + 1} is not an object`)
+  }
 
-  for (const word of words) {
-    const trimmedWord = word.trim()
-    const wordKey = trimmedWord.toLowerCase()
+  const prompt = getRequiredString(
+    value,
+    'prompt',
+    `Generated question ${questionIndex + 1} prompt`
+  )
+  const explanation = getRequiredString(
+    value,
+    'explanation',
+    `Generated question ${questionIndex + 1} explanation`
+  )
+  const promptKey = normalizeChoiceKey(prompt)
 
-    if (trimmedWord.length === 0 || seenWords.has(wordKey)) {
-      continue
+  if (questionPrompts.has(promptKey)) {
+    throw new Error(`Generated question ${questionIndex + 1} duplicates another question prompt`)
+  }
+
+  questionPrompts.add(promptKey)
+
+  const choicesValue = value['choices']
+
+  if (!Array.isArray(choicesValue)) {
+    throw new Error(`Generated question ${questionIndex + 1} did not return a choices array`)
+  }
+
+  if (choicesValue.length !== settings.choicesPerQuestion) {
+    throw new Error(
+      `Generated question ${questionIndex + 1} returned ${choicesValue.length} choices instead of ${settings.choicesPerQuestion}`
+    )
+  }
+
+  const choiceTexts = new Set<string>()
+  let correctChoiceCount = 0
+  const choices = choicesValue.map((choiceValue, choiceIndex) => {
+    const choice = validateGeneratedChoice(choiceValue, questionIndex, choiceIndex)
+    const choiceKey = normalizeChoiceKey(choice.choiceText)
+
+    if (choiceTexts.has(choiceKey)) {
+      throw new Error(`Generated question ${questionIndex + 1} has duplicate answer choice text`)
     }
 
-    unique.push(trimmedWord)
-    seenWords.add(wordKey)
+    choiceTexts.add(choiceKey)
+
+    if (choice.isCorrect) {
+      correctChoiceCount += 1
+    }
+
+    return choice
+  })
+
+  if (correctChoiceCount !== 1) {
+    throw new Error(`Generated question ${questionIndex + 1} must have exactly one correct answer`)
   }
 
-  return unique
+  return {
+    prompt,
+    explanation,
+    choices
+  }
 }
 
-function replaceKeywordWithBlank(excerpt: string, keyword: string): string {
-  const keywordPattern = new RegExp(`\\b${escapeRegExp(keyword)}\\b`, 'i')
+function validateGeneratedChoice(
+  value: unknown,
+  questionIndex: number,
+  choiceIndex: number
+): SaveQuizQuestionInput['choices'][number] {
+  if (!isRecord(value)) {
+    throw new Error(
+      `Generated question ${questionIndex + 1} choice ${choiceIndex + 1} is not an object`
+    )
+  }
 
-  return excerpt.replace(keywordPattern, '____')
+  const choiceText = getRequiredString(
+    value,
+    'choiceText',
+    `Generated question ${questionIndex + 1} choice ${choiceIndex + 1} text`
+  )
+  const isCorrect = value['isCorrect']
+
+  if (typeof isCorrect !== 'boolean') {
+    throw new Error(
+      `Generated question ${questionIndex + 1} choice ${choiceIndex + 1} correctness must be a boolean`
+    )
+  }
+
+  return {
+    choiceText,
+    isCorrect
+  }
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+function getRequiredString(value: Record<string, unknown>, key: string, label: string): string {
+  const fieldValue = value[key]
+
+  if (typeof fieldValue !== 'string') {
+    throw new Error(`${label} must be a string`)
+  }
+
+  const trimmedValue = fieldValue.trim()
+
+  if (trimmedValue.length === 0) {
+    throw new Error(`${label} is required`)
+  }
+
+  return trimmedValue
+}
+
+function parseGeneratedQuizJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+
+    throw new Error(`OpenAI quiz generation returned invalid JSON: ${message}`)
+  }
+}
+
+function formatLessonTextForPrompt(lessonText: LessonTextForQuizGeneration): string {
+  if (lessonText.pages.length === 0) {
+    return normalizeWhitespace(lessonText.fullText)
+  }
+
+  return lessonText.pages
+    .map((page) => `Page ${page.pageNumber}:\n${normalizeWhitespace(page.text)}`)
+    .join('\n\n')
+}
+
+function getMaxOutputTokens(questionCount: number): number {
+  return Math.min(120000, 3000 + questionCount * 900)
 }
 
 function normalizeChoiceKey(value: string): string {
-  return value.trim().toLowerCase()
+  return normalizeWhitespace(value).toLowerCase()
 }
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
 
-function truncateText(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value
-  }
-
-  return `${value.slice(0, maxLength - 3).trimEnd()}...`
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function cleanupGeneratedQuiz(connection: DatabaseSync, quizId: string): void {

@@ -437,7 +437,10 @@ function App(): JSX.Element {
         lessonId: activeLesson.id,
         settings: {
           questionCount,
-          difficulty: selectedDifficultyId
+          difficulty: selectedDifficultyId,
+          ...(selectedDifficultyId === 'custom'
+            ? { customDifficultyInstructions: customDifficultyInstructions.trim() }
+            : {})
         }
       })
 

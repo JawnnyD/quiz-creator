@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -137,14 +138,17 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('quizzes:create', (_, input: GenerateTemporaryQuizInput): FullQuiz => {
-    try {
-      return generateTemporaryQuizFromLessonText(input)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to create quiz: ${message}`)
+  ipcMain.handle(
+    'quizzes:create',
+    async (_, input: GenerateTemporaryQuizInput): Promise<FullQuiz> => {
+      try {
+        return await generateTemporaryQuizFromLessonText(input)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw new Error(`Unable to create quiz: ${message}`)
+      }
     }
-  })
+  )
 
   ipcMain.handle('quizzes:listForLesson', (_, lessonId: string): QuizRecord[] => {
     try {

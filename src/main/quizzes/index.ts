@@ -86,6 +86,8 @@ export function submitQuizAttempt(quizId: string, answers: QuizAnswerSubmission[
   return submitQuizAttemptFromDatabase(initializeDatabase(), quizId, answers)
 }
 
-export function generateTemporaryQuizFromLessonText(input: GenerateTemporaryQuizInput): FullQuiz {
+export async function generateTemporaryQuizFromLessonText(
+  input: GenerateTemporaryQuizInput
+): Promise<FullQuiz> {
   return generateTemporaryQuizFromLessonTextFromDatabase(initializeDatabase(), input)
 }

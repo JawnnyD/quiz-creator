@@ -16,6 +16,8 @@ $ npm install
 
 ### Development
 
+Create a `.env` file in the project root or set `OPENAI_API_KEY` in the shell that starts the app before generating quizzes.
+
 ```bash
 $ npm run dev
 ```

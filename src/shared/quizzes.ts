@@ -51,9 +51,9 @@ export interface QuizResult {
   }>
 }
 
-// Placeholder until quiz generation format requirements are defined.
 export interface QuizCreationSettings {
   questionCount: number
   choicesPerQuestion: number
   difficulty?: QuizDifficulty
+  customDifficultyInstructions?: string
 }
