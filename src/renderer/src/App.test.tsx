@@ -64,6 +64,61 @@ describe('App quiz taking flows', () => {
   })
 })
 
+describe('App lesson sorting', () => {
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it('sorts lessons by import date and title in both directions', async () => {
+    setWindowApi(
+      createApi({
+        listLessons: vi.fn(async () => [
+          createLesson({
+            id: 'lesson-old',
+            title: 'alpha 10',
+            originalFileName: 'alpha-10.pdf',
+            createdAt: '2026-01-01 12:00:00'
+          }),
+          createLesson({
+            id: 'lesson-new',
+            title: 'Alpha 2',
+            originalFileName: 'alpha-2.pdf',
+            createdAt: '2026-01-03 12:00:00'
+          }),
+          createLesson({
+            id: 'lesson-middle',
+            title: 'Zebra 2',
+            originalFileName: 'zebra-2.pdf',
+            createdAt: '2026-01-02 12:00:00'
+          })
+        ])
+      })
+    )
+
+    render(<App />)
+
+    await screen.findByRole('list', { name: 'Imported lessons' })
+    expect(getRenderedLessonTitles()).toEqual(['Alpha 2', 'Zebra 2', 'alpha 10'])
+
+    fireEvent.change(screen.getByLabelText('Sort lessons by'), { target: { value: 'title' } })
+    expect(getSortDirectionButton().textContent).toBe('↑')
+    expect(getRenderedLessonTitles()).toEqual(['Alpha 2', 'alpha 10', 'Zebra 2'])
+
+    fireEvent.click(getSortDirectionButton())
+    expect(getSortDirectionButton().textContent).toBe('↓')
+    expect(getRenderedLessonTitles()).toEqual(['Zebra 2', 'alpha 10', 'Alpha 2'])
+
+    fireEvent.change(screen.getByLabelText('Sort lessons by'), { target: { value: 'createdAt' } })
+    expect(getSortDirectionButton().textContent).toBe('↓')
+    expect(getRenderedLessonTitles()).toEqual(['Alpha 2', 'Zebra 2', 'alpha 10'])
+
+    fireEvent.click(getSortDirectionButton())
+    expect(getSortDirectionButton().textContent).toBe('↑')
+    expect(getRenderedLessonTitles()).toEqual(['alpha 10', 'Zebra 2', 'Alpha 2'])
+  })
+})
+
 function createApi(overrides: Partial<AppAPI> = {}): AppAPI {
   return {
     importLessonPdf: vi.fn(async () => null),
@@ -89,7 +144,17 @@ function setWindowApi(api: AppAPI): void {
   })
 }
 
-function createLesson(): LessonRecord {
+function getSortDirectionButton(): HTMLButtonElement {
+  return screen.getByRole('button', { name: /sort (oldest first|newest first|z to a|a to z)/i })
+}
+
+function getRenderedLessonTitles(): string[] {
+  return Array.from(document.querySelectorAll('.lesson-title-text')).map(
+    (element) => element.textContent ?? ''
+  )
+}
+
+function createLesson(overrides: Partial<LessonRecord> = {}): LessonRecord {
   return {
     id: 'lesson-1',
     title: 'Cardiology',
@@ -102,7 +167,8 @@ function createLesson(): LessonRecord {
     textCharacterCount: 100,
     textExtractionError: null,
     createdAt: timestamp,
-    updatedAt: timestamp
+    updatedAt: timestamp,
+    ...overrides
   }
 }
 

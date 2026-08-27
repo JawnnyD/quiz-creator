@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+  type KeyboardEvent
+} from 'react'
 import { isAppError, type AppErrorCode } from '../../shared/errors'
 import type { LessonRecord } from '../../shared/lessons'
 import type { QuizAttempt, QuizDifficulty, QuizRecord, QuizResult } from '../../shared/quizzes'
@@ -6,6 +13,8 @@ import type { QuizAttempt, QuizDifficulty, QuizRecord, QuizResult } from '../../
 type FullQuiz = NonNullable<Awaited<ReturnType<Window['api']['getQuiz']>>>
 type QuizAnswerSubmission = Parameters<Window['api']['submitQuizAttempt']>[1][number]
 type TitleEditTargetKind = 'lesson' | 'quiz'
+type LessonSortField = 'createdAt' | 'title'
+type SortDirection = 'asc' | 'desc'
 
 interface TitleEditTarget {
   kind: TitleEditTargetKind
@@ -13,9 +22,22 @@ interface TitleEditTarget {
 }
 
 const defaultQuestionCountInput = '10'
+const defaultLessonSortField: LessonSortField = 'createdAt'
+const defaultLessonSortDirection: SortDirection = 'desc'
 const minQuestionCount = 0
 const maxQuestionCount = 50
 const questionCountSliderStep = 5
+const lessonTitleCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: 'base'
+})
+const lessonSortOptions = [
+  { id: 'createdAt', label: 'Import date' },
+  { id: 'title', label: 'Title' }
+] as const satisfies ReadonlyArray<{
+  id: LessonSortField
+  label: string
+}>
 
 const difficultyOptions = [
   { id: 'easy', label: 'Easy', description: 'Recall and basic understanding.' },
@@ -29,6 +51,11 @@ const difficultyOptions = [
 
 function App(): JSX.Element {
   const [lessons, setLessons] = useState<LessonRecord[]>([])
+  const [lessonSortField, setLessonSortField] = useState<LessonSortField>(defaultLessonSortField)
+  const [lessonSortDirection, setLessonSortDirection] = useState<SortDirection>(
+    defaultLessonSortDirection
+  )
+  const [isLessonSortMenuOpen, setIsLessonSortMenuOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isImporting, setIsImporting] = useState(false)
   const [deletingLessonIds, setDeletingLessonIds] = useState<Set<string>>(() => new Set())
@@ -61,6 +88,7 @@ function App(): JSX.Element {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const quizLoadRequestIdRef = useRef(0)
+  const lessonSortDropdownRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let isCanceled = false
@@ -90,6 +118,38 @@ function App(): JSX.Element {
     }
   }, [])
 
+  useEffect(() => {
+    if (!isLessonSortMenuOpen) {
+      return
+    }
+
+    const closeLessonSortMenuOnOutsideClick = (event: PointerEvent): void => {
+      const target = event.target
+
+      if (
+        target instanceof Node &&
+        lessonSortDropdownRef.current !== null &&
+        !lessonSortDropdownRef.current.contains(target)
+      ) {
+        setIsLessonSortMenuOpen(false)
+      }
+    }
+
+    const closeLessonSortMenuOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setIsLessonSortMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', closeLessonSortMenuOnOutsideClick)
+    document.addEventListener('keydown', closeLessonSortMenuOnEscape)
+
+    return () => {
+      document.removeEventListener('pointerdown', closeLessonSortMenuOnOutsideClick)
+      document.removeEventListener('keydown', closeLessonSortMenuOnEscape)
+    }
+  }, [isLessonSortMenuOpen])
+
   const activeLesson = useMemo(() => {
     if (activeLessonId === null) {
       return null
@@ -106,6 +166,10 @@ function App(): JSX.Element {
 
     return quizzes.find((quiz) => quiz.id === activeAttemptHistoryQuizId) ?? null
   }, [quizzes, activeAttemptHistoryQuizId])
+  const sortedLessons = useMemo(
+    () => sortLessons(lessons, lessonSortField, lessonSortDirection),
+    [lessons, lessonSortField, lessonSortDirection]
+  )
 
   useEffect(() => {
     if (activeLessonIdForQuizLoading === null) {
@@ -419,6 +483,25 @@ function App(): JSX.Element {
       event.preventDefault()
       cancelTitleEdit()
     }
+  }
+
+  const toggleLessonSortMenu = (): void => {
+    setIsLessonSortMenuOpen((isOpen) => !isOpen)
+  }
+
+  const selectLessonSortField = (nextSortField: LessonSortField): void => {
+    if (nextSortField !== lessonSortField) {
+      setLessonSortField(nextSortField)
+      setLessonSortDirection(getDefaultLessonSortDirection(nextSortField))
+    }
+
+    setIsLessonSortMenuOpen(false)
+  }
+
+  const toggleLessonSortDirection = (): void => {
+    setLessonSortDirection((currentSortDirection) =>
+      currentSortDirection === 'asc' ? 'desc' : 'asc'
+    )
   }
 
   const renderTitleEditForm = (kind: TitleEditTargetKind, inputId?: string): JSX.Element => (
@@ -886,14 +969,78 @@ function App(): JSX.Element {
               <h1 id="lessons-heading">Lessons</h1>
               <p>{lessonSummary}</p>
             </div>
-            <button
-              className="upload-button"
-              type="button"
-              onClick={openPdfPicker}
-              disabled={isImporting}
-            >
-              {isImporting ? 'Importing...' : 'Upload PDF'}
-            </button>
+            <div className="lesson-header-actions">
+              {lessons.length > 1 ? (
+                <div className="lesson-sort-controls" aria-label="Lesson sorting">
+                  <div className="lesson-sort-control" ref={lessonSortDropdownRef}>
+                    <span id="lesson-sort-label">Sort by</span>
+                    <button
+                      className="lesson-sort-menu-button"
+                      type="button"
+                      onClick={toggleLessonSortMenu}
+                      aria-haspopup="listbox"
+                      aria-expanded={isLessonSortMenuOpen}
+                      aria-labelledby="lesson-sort-label lesson-sort-selected-value"
+                    >
+                      <span id="lesson-sort-selected-value">
+                        {getLessonSortFieldLabel(lessonSortField)}
+                      </span>
+                      <span className="lesson-sort-menu-chevron" aria-hidden="true">
+                        {isLessonSortMenuOpen ? '\u25B4' : '\u25BE'}
+                      </span>
+                    </button>
+                    {isLessonSortMenuOpen ? (
+                      <div
+                        className="lesson-sort-menu"
+                        role="listbox"
+                        aria-labelledby="lesson-sort-label"
+                      >
+                        {lessonSortOptions.map((option) => {
+                          const isSelectedOption = lessonSortField === option.id
+
+                          return (
+                            <button
+                              className={`lesson-sort-option${
+                                isSelectedOption ? ' lesson-sort-option-selected' : ''
+                              }`}
+                              type="button"
+                              role="option"
+                              aria-selected={isSelectedOption}
+                              key={option.id}
+                              onClick={() => {
+                                selectLessonSortField(option.id)
+                              }}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    className="lesson-sort-direction-button"
+                    type="button"
+                    onClick={toggleLessonSortDirection}
+                    aria-label={getLessonSortDirectionToggleLabel(
+                      lessonSortField,
+                      lessonSortDirection
+                    )}
+                    title={getLessonSortDirectionCurrentLabel(lessonSortField, lessonSortDirection)}
+                  >
+                    {lessonSortDirection === 'asc' ? '\u2191' : '\u2193'}
+                  </button>
+                </div>
+              ) : null}
+              <button
+                className="upload-button"
+                type="button"
+                onClick={openPdfPicker}
+                disabled={isImporting}
+              >
+                {isImporting ? 'Importing...' : 'Upload PDF'}
+              </button>
+            </div>
           </header>
         ) : null}
 
@@ -1174,7 +1321,7 @@ function App(): JSX.Element {
           <p className="empty-state">Import a PDF to create your first lesson.</p>
         ) : activeLesson === null ? (
           <ul className="lesson-list" aria-label="Imported lessons">
-            {lessons.map((lesson) => {
+            {sortedLessons.map((lesson) => {
               const isEditingLessonTitle = isEditingTitle('lesson', lesson.id)
 
               return (
@@ -1500,6 +1647,95 @@ function upsertLesson(lessons: LessonRecord[], lesson: LessonRecord): LessonReco
   return nextLessons.sort((firstLesson, secondLesson) =>
     secondLesson.createdAt.localeCompare(firstLesson.createdAt)
   )
+}
+
+function sortLessons(
+  lessons: LessonRecord[],
+  sortField: LessonSortField,
+  sortDirection: SortDirection
+): LessonRecord[] {
+  return [...lessons].sort((firstLesson, secondLesson) => {
+    if (sortField === 'createdAt') {
+      const dateComparison = compareLessonImportDateAscending(firstLesson, secondLesson)
+      const directedDateComparison = sortDirection === 'asc' ? dateComparison : -dateComparison
+
+      if (directedDateComparison !== 0) {
+        return directedDateComparison
+      }
+
+      return (
+        compareLessonTitleAscending(firstLesson, secondLesson) ||
+        compareLessonId(firstLesson, secondLesson)
+      )
+    }
+
+    const titleComparison = compareLessonTitleAscending(firstLesson, secondLesson)
+    const directedTitleComparison = sortDirection === 'asc' ? titleComparison : -titleComparison
+
+    if (directedTitleComparison !== 0) {
+      return directedTitleComparison
+    }
+
+    return (
+      -compareLessonImportDateAscending(firstLesson, secondLesson) ||
+      compareLessonId(firstLesson, secondLesson)
+    )
+  })
+}
+
+function compareLessonImportDateAscending(
+  firstLesson: LessonRecord,
+  secondLesson: LessonRecord
+): number {
+  const firstTime = parseStoredTimestamp(firstLesson.createdAt).getTime()
+  const secondTime = parseStoredTimestamp(secondLesson.createdAt).getTime()
+
+  if (Number.isFinite(firstTime) && Number.isFinite(secondTime) && firstTime !== secondTime) {
+    return firstTime - secondTime
+  }
+
+  return firstLesson.createdAt.localeCompare(secondLesson.createdAt)
+}
+
+function compareLessonTitleAscending(
+  firstLesson: LessonRecord,
+  secondLesson: LessonRecord
+): number {
+  return lessonTitleCollator.compare(firstLesson.title, secondLesson.title)
+}
+
+function compareLessonId(firstLesson: LessonRecord, secondLesson: LessonRecord): number {
+  return firstLesson.id.localeCompare(secondLesson.id)
+}
+
+function getDefaultLessonSortDirection(sortField: LessonSortField): SortDirection {
+  return sortField === 'createdAt' ? 'desc' : 'asc'
+}
+
+function getLessonSortFieldLabel(sortField: LessonSortField): string {
+  return lessonSortOptions.find((option) => option.id === sortField)?.label ?? 'Import date'
+}
+
+function getLessonSortDirectionCurrentLabel(
+  sortField: LessonSortField,
+  sortDirection: SortDirection
+): string {
+  if (sortField === 'createdAt') {
+    return sortDirection === 'asc' ? 'Oldest first' : 'Newest first'
+  }
+
+  return sortDirection === 'asc' ? 'A to Z' : 'Z to A'
+}
+
+function getLessonSortDirectionToggleLabel(
+  sortField: LessonSortField,
+  sortDirection: SortDirection
+): string {
+  if (sortField === 'createdAt') {
+    return sortDirection === 'asc' ? 'Sort newest first' : 'Sort oldest first'
+  }
+
+  return sortDirection === 'asc' ? 'Sort Z to A' : 'Sort A to Z'
 }
 
 function upsertQuiz(quizzes: QuizRecord[], quiz: QuizRecord): QuizRecord[] {
