@@ -503,7 +503,7 @@ function App(): JSX.Element {
         return
       }
 
-      setActiveQuiz(loadedQuiz)
+      setActiveQuiz(randomizeQuizForAttempt(loadedQuiz))
     } catch (error) {
       if (quizLoadRequestIdRef.current === requestId) {
         setQuizTakingErrorMessage(getErrorMessage(error))
@@ -1339,6 +1339,30 @@ function getSelectedChoiceIdsByQuestionId(result: QuizResult): Record<string, st
   }
 
   return selectedChoiceIdsByQuestionId
+}
+
+function randomizeQuizForAttempt(quiz: FullQuiz): FullQuiz {
+  return {
+    ...quiz,
+    questions: shuffleItems(quiz.questions).map((question) => ({
+      ...question,
+      choices: shuffleItems(question.choices)
+    }))
+  }
+}
+
+function shuffleItems<T>(items: readonly T[]): T[] {
+  const shuffledItems = [...items]
+
+  for (let index = shuffledItems.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1))
+    const currentItem = shuffledItems[index]
+
+    shuffledItems[index] = shuffledItems[randomIndex]
+    shuffledItems[randomIndex] = currentItem
+  }
+
+  return shuffledItems
 }
 
 function formatDate(value: string): string {
