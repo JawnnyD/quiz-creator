@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { QuizDifficulty } from '../../shared/quizzes'
 import { createDatabaseConnection } from '../db/connection'
 import { loadFullQuizFromDatabase } from './service'
 import { generateTemporaryQuizFromLessonTextFromDatabase } from './generator'
@@ -8,6 +9,29 @@ import { generateTemporaryQuizFromLessonTextFromDatabase } from './generator'
 const openAiCreateMock = vi.hoisted(() => vi.fn())
 const aiResponseMalformedMessage =
   'The AI returned a quiz format this app could not use. Try generating again.'
+const difficultyGenerationCases: Array<{
+  difficulty: QuizDifficulty
+  expectedModel: string
+  expectedInstructionsText: string
+  customDifficultyInstructions?: string
+}> = [
+  {
+    difficulty: 'easy',
+    expectedModel: 'gpt-5.6-luna',
+    expectedInstructionsText: 'Difficulty: Easy'
+  },
+  {
+    difficulty: 'nbme',
+    expectedModel: 'gpt-5.6-terra',
+    expectedInstructionsText: 'Difficulty: NBME'
+  },
+  {
+    difficulty: 'custom',
+    expectedModel: 'gpt-5.6-luna',
+    expectedInstructionsText: 'User custom instructions:',
+    customDifficultyInstructions: 'Focus on pharmacology mechanisms.'
+  }
+]
 
 vi.mock('openai', () => ({
   default: vi.fn().mockImplementation(function OpenAI() {
@@ -155,6 +179,61 @@ describe('quiz generation error states', () => {
       }
     }
   })
+
+  it.each(difficultyGenerationCases)(
+    'generates and stores valid quizzes for $difficulty difficulty',
+    async ({
+      difficulty,
+      expectedModel,
+      expectedInstructionsText,
+      customDifficultyInstructions
+    }) => {
+      insertLessonWithCompletedText(`lesson-${difficulty}`)
+      openAiCreateMock.mockResolvedValue({
+        status: 'completed',
+        output_text: JSON.stringify(createGeneratedQuiz(1))
+      })
+
+      const generatedQuiz = await generateTemporaryQuizFromLessonTextFromDatabase(connection, {
+        lessonId: `lesson-${difficulty}`,
+        settings: {
+          questionCount: 1,
+          difficulty,
+          customDifficultyInstructions
+        }
+      })
+
+      expect(generatedQuiz.quiz).toMatchObject({
+        lessonId: `lesson-${difficulty}`,
+        difficulty,
+        questionCount: 1
+      })
+      expect(generatedQuiz.questions).toHaveLength(1)
+      expect(generatedQuiz.questions[0]?.choices).toHaveLength(5)
+      expect(generatedQuiz.questions[0]?.choices.filter((choice) => choice.isCorrect)).toHaveLength(
+        1
+      )
+      expect(countRows('quizzes')).toBe(1)
+      expect(loadFullQuizFromDatabase(connection, generatedQuiz.quiz.id)).toEqual(generatedQuiz)
+      expect(openAiCreateMock).toHaveBeenCalledTimes(1)
+
+      const firstCall = openAiCreateMock.mock.calls[0]
+
+      if (firstCall === undefined) {
+        throw new Error('Expected OpenAI to be called')
+      }
+
+      const request = firstCall[0] as { model: string; instructions: string; input: string }
+
+      expect(request.model).toBe(expectedModel)
+      expect(request.instructions).toContain(expectedInstructionsText)
+      expect(request.input).toContain(`- Difficulty: ${difficulty}`)
+
+      if (customDifficultyInstructions !== undefined) {
+        expect(request.instructions).toContain(customDifficultyInstructions)
+      }
+    }
+  )
 
   it.each([
     ['invalid JSON', '{not-json'],

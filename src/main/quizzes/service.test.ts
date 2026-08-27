@@ -6,10 +6,12 @@ import { deleteLessonWithStorage } from '../lessons/service'
 import {
   createQuizRecordFromDatabase,
   deleteQuizFromDatabase,
+  listQuizAttemptsForLessonFromDatabase,
   loadFullQuizFromDatabase,
   loadQuizAttemptResultFromDatabase,
   saveQuizQuestionsFromDatabase,
   submitQuizAttemptFromDatabase,
+  updateQuizTitleFromDatabase,
   type SaveQuizQuestionInput
 } from './service'
 
@@ -129,6 +131,79 @@ describe('quiz service validation and deletion', () => {
     expect(loadQuizAttemptResultFromDatabase(connection, result.attempt.id)).toEqual(result)
   })
 
+  it('edits a quiz title and trims user input', () => {
+    const { quiz } = createStoredQuiz()
+
+    const updatedQuiz = updateQuizTitleFromDatabase(connection, quiz.id, '  Cardiology Blocks  ')
+
+    expect(updatedQuiz).toMatchObject({
+      id: quiz.id,
+      lessonId: quiz.lessonId,
+      title: 'Cardiology Blocks',
+      difficulty: 'easy',
+      questionCount: 2
+    })
+    expect(loadFullQuizFromDatabase(connection, quiz.id)?.quiz.title).toBe('Cardiology Blocks')
+  })
+
+  it('lists completed attempt history for the requested lesson', () => {
+    const { quiz, questions } = createStoredQuiz()
+    const otherQuiz = createStoredQuiz({ lessonId: 'lesson-2', title: 'Renal Quiz' })
+    const result = submitQuizAttemptFromDatabase(connection, quiz.id, [
+      {
+        questionId: questions[0].id,
+        selectedChoiceId: requireChoiceId(questions[0], true)
+      },
+      {
+        questionId: questions[1].id,
+        selectedChoiceId: requireChoiceId(questions[1], false)
+      }
+    ])
+    submitQuizAttemptFromDatabase(connection, otherQuiz.quiz.id, [
+      {
+        questionId: otherQuiz.questions[0].id,
+        selectedChoiceId: requireChoiceId(otherQuiz.questions[0], true)
+      },
+      {
+        questionId: otherQuiz.questions[1].id,
+        selectedChoiceId: requireChoiceId(otherQuiz.questions[1], true)
+      }
+    ])
+
+    expect(listQuizAttemptsForLessonFromDatabase(connection, 'lesson-1')).toEqual([result.attempt])
+  })
+
+  it('retaking a quiz creates separate saved attempts', () => {
+    const { quiz, questions } = createStoredQuiz()
+    const firstAttempt = submitQuizAttemptFromDatabase(connection, quiz.id, [
+      {
+        questionId: questions[0].id,
+        selectedChoiceId: requireChoiceId(questions[0], true)
+      },
+      {
+        questionId: questions[1].id,
+        selectedChoiceId: requireChoiceId(questions[1], false)
+      }
+    ])
+    const secondAttempt = submitQuizAttemptFromDatabase(connection, quiz.id, [
+      {
+        questionId: questions[0].id,
+        selectedChoiceId: requireChoiceId(questions[0], false)
+      },
+      {
+        questionId: questions[1].id,
+        selectedChoiceId: requireChoiceId(questions[1], true)
+      }
+    ])
+
+    expect(secondAttempt.attempt.id).not.toBe(firstAttempt.attempt.id)
+    expect(countRows('quiz_attempts')).toBe(2)
+    expect(countRows('quiz_attempt_answers')).toBe(4)
+    expect(listQuizAttemptsForLessonFromDatabase(connection, 'lesson-1')).toEqual(
+      expect.arrayContaining([firstAttempt.attempt, secondAttempt.attempt])
+    )
+  })
+
   it('deletes quizzes idempotently and cascades child records', () => {
     const { quiz, questions } = createStoredQuiz()
     const result = submitQuizAttemptFromDatabase(connection, quiz.id, [
@@ -209,12 +284,16 @@ describe('quiz service validation and deletion', () => {
   })
 })
 
-function createStoredQuiz(): NonNullable<ReturnType<typeof loadFullQuizFromDatabase>> {
-  insertLesson('lesson-1')
+function createStoredQuiz(
+  options: { lessonId?: string; title?: string } = {}
+): NonNullable<ReturnType<typeof loadFullQuizFromDatabase>> {
+  const lessonId = options.lessonId ?? 'lesson-1'
+
+  insertLesson(lessonId)
 
   const quiz = createQuizRecordFromDatabase(connection, {
-    lessonId: 'lesson-1',
-    title: 'Cardiology Quiz',
+    lessonId,
+    title: options.title ?? 'Cardiology Quiz',
     difficulty: 'easy'
   })
 
