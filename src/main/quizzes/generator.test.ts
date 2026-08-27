@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createDatabaseConnection } from '../db/connection'
+import { loadFullQuizFromDatabase } from './service'
 import { generateTemporaryQuizFromLessonTextFromDatabase } from './generator'
 
 const openAiCreateMock = vi.hoisted(() => vi.fn())
@@ -104,6 +105,55 @@ describe('quiz generation error states', () => {
       }
     )
     expect(countRows('quizzes')).toBe(0)
+  })
+
+  it('persists valid generated quiz data', async () => {
+    insertLessonWithCompletedText('lesson-1')
+    openAiCreateMock.mockResolvedValue({
+      status: 'completed',
+      output_text: JSON.stringify({
+        title: ' Generated Quiz ',
+        questions: [
+          createGeneratedQuestion(1, { wrapWhitespace: true }),
+          createGeneratedQuestion(2, { wrapWhitespace: true })
+        ]
+      })
+    })
+
+    const generatedQuiz = await generateTemporaryQuizFromLessonTextFromDatabase(connection, {
+      lessonId: 'lesson-1',
+      settings: {
+        questionCount: 2,
+        difficulty: 'easy'
+      }
+    })
+
+    expect(generatedQuiz.quiz).toMatchObject({
+      lessonId: 'lesson-1',
+      title: 'Generated Quiz',
+      difficulty: 'easy',
+      questionCount: 2
+    })
+    expect(generatedQuiz.questions).toHaveLength(2)
+    expect(countRows('quizzes')).toBe(1)
+    expect(countRows('quiz_questions')).toBe(2)
+    expect(countRows('quiz_question_choices')).toBe(10)
+    expect(loadFullQuizFromDatabase(connection, generatedQuiz.quiz.id)).toEqual(generatedQuiz)
+
+    for (const question of generatedQuiz.questions) {
+      expect(question.prompt).toBe(question.prompt.trim())
+      expect(question.prompt.length).toBeGreaterThan(0)
+      expect(question.explanation).not.toBeNull()
+      expect(question.explanation).toBe(question.explanation?.trim())
+      expect(question.explanation?.length).toBeGreaterThan(0)
+      expect(question.choices).toHaveLength(5)
+      expect(question.choices.filter((choice) => choice.isCorrect)).toHaveLength(1)
+
+      for (const choice of question.choices) {
+        expect(choice.choiceText).toBe(choice.choiceText.trim())
+        expect(choice.choiceText.length).toBeGreaterThan(0)
+      }
+    }
   })
 
   it.each([
@@ -251,15 +301,20 @@ function createGeneratedQuiz(questionCount: number): unknown {
 
 function createGeneratedQuestion(
   questionNumber: number,
-  options: { prompt?: string; correctChoiceIndexes?: number[] } = {}
+  options: { prompt?: string; correctChoiceIndexes?: number[]; wrapWhitespace?: boolean } = {}
 ): unknown {
   const correctChoiceIndexes = options.correctChoiceIndexes ?? [0]
+  const prompt = options.prompt ?? `Question ${questionNumber}?`
+  const explanation = `Explanation ${questionNumber}.`
 
   return {
-    prompt: options.prompt ?? `Question ${questionNumber}?`,
-    explanation: `Explanation ${questionNumber}.`,
+    prompt: options.wrapWhitespace === true ? ` ${prompt} ` : prompt,
+    explanation: options.wrapWhitespace === true ? ` ${explanation} ` : explanation,
     choices: Array.from({ length: 5 }, (_, choiceIndex) => ({
-      choiceText: `Question ${questionNumber} choice ${choiceIndex + 1}`,
+      choiceText:
+        options.wrapWhitespace === true
+          ? ` Question ${questionNumber} choice ${choiceIndex + 1} `
+          : `Question ${questionNumber} choice ${choiceIndex + 1}`,
       isCorrect: correctChoiceIndexes.includes(choiceIndex)
     }))
   }

@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDatabaseConnection } from '../db/connection'
+import { deleteLessonWithStorage } from '../lessons/service'
 import {
   createQuizRecordFromDatabase,
   deleteQuizFromDatabase,
@@ -89,6 +90,45 @@ describe('quiz service validation and deletion', () => {
     expect(countRows('quiz_attempts')).toBe(0)
   })
 
+  it('grades and persists mixed correct and incorrect answers', () => {
+    const { quiz, questions } = createStoredQuiz()
+    const firstQuestion = questions[0]
+    const secondQuestion = questions[1]
+    const firstCorrectChoice = requireChoiceId(firstQuestion, true)
+    const secondIncorrectChoice = requireChoiceId(secondQuestion, false)
+    const result = submitQuizAttemptFromDatabase(connection, quiz.id, [
+      {
+        questionId: firstQuestion.id,
+        selectedChoiceId: firstCorrectChoice
+      },
+      {
+        questionId: secondQuestion.id,
+        selectedChoiceId: secondIncorrectChoice
+      }
+    ])
+
+    expect(result.quiz).toEqual(quiz)
+    expect(result.attempt).toMatchObject({
+      quizId: quiz.id,
+      completedAt: expect.any(String),
+      correctAnswerCount: 1,
+      totalQuestionCount: 2
+    })
+    expect(result.answers).toHaveLength(2)
+    expect(result.answers.map((answer) => answer.question.id)).toEqual([
+      firstQuestion.id,
+      secondQuestion.id
+    ])
+    expect(result.answers.map((answer) => answer.selectedChoiceId)).toEqual([
+      firstCorrectChoice,
+      secondIncorrectChoice
+    ])
+    expect(result.answers.map((answer) => answer.isCorrect)).toEqual([true, false])
+    expect(countRows('quiz_attempts')).toBe(1)
+    expect(countRows('quiz_attempt_answers')).toBe(2)
+    expect(loadQuizAttemptResultFromDatabase(connection, result.attempt.id)).toEqual(result)
+  })
+
   it('deletes quizzes idempotently and cascades child records', () => {
     const { quiz, questions } = createStoredQuiz()
     const result = submitQuizAttemptFromDatabase(connection, quiz.id, [
@@ -117,6 +157,55 @@ describe('quiz service validation and deletion', () => {
     expect(countRows('quiz_attempts')).toBe(0)
     expect(countRows('quiz_attempt_answers')).toBe(0)
     expect(deleteQuizFromDatabase(connection, quiz.id)).toEqual({ deleted: false })
+  })
+
+  it('deleting a lesson cascades text, quizzes, questions, choices, attempts, and answers', () => {
+    const { quiz, questions } = createStoredQuiz()
+    insertLessonText('lesson-1')
+    const result = submitQuizAttemptFromDatabase(connection, quiz.id, [
+      {
+        questionId: questions[0].id,
+        selectedChoiceId: requireChoiceId(questions[0], true)
+      },
+      {
+        questionId: questions[1].id,
+        selectedChoiceId: requireChoiceId(questions[1], false)
+      }
+    ])
+
+    expect(countRows('lessons')).toBe(1)
+    expect(countRows('lesson_text_extractions')).toBe(1)
+    expect(countRows('lesson_text_pages')).toBe(1)
+    expect(countRows('quizzes')).toBe(1)
+    expect(countRows('quiz_questions')).toBe(2)
+    expect(countRows('quiz_question_choices')).toBe(10)
+    expect(countRows('quiz_attempts')).toBe(1)
+    expect(countRows('quiz_attempt_answers')).toBe(2)
+
+    expect(deleteLessonWithStorage(connection, 'C:/quiz-creator-test-storage', 'lesson-1')).toEqual(
+      {
+        deleted: true,
+        fileDeleted: false,
+        cleanupError: null
+      }
+    )
+    expect(loadFullQuizFromDatabase(connection, quiz.id)).toBeNull()
+    expect(loadQuizAttemptResultFromDatabase(connection, result.attempt.id)).toBeNull()
+    expect(countRows('lessons')).toBe(0)
+    expect(countRows('lesson_text_extractions')).toBe(0)
+    expect(countRows('lesson_text_pages')).toBe(0)
+    expect(countRows('quizzes')).toBe(0)
+    expect(countRows('quiz_questions')).toBe(0)
+    expect(countRows('quiz_question_choices')).toBe(0)
+    expect(countRows('quiz_attempts')).toBe(0)
+    expect(countRows('quiz_attempt_answers')).toBe(0)
+    expect(deleteLessonWithStorage(connection, 'C:/quiz-creator-test-storage', 'lesson-1')).toEqual(
+      {
+        deleted: false,
+        fileDeleted: false,
+        cleanupError: null
+      }
+    )
   })
 })
 
@@ -191,10 +280,38 @@ function insertLesson(id: string): void {
       'Cardiology',
       'cardiology.pdf',
       'C:/lessons/cardiology.pdf',
-      `${id}.pdf`,
+      `lesson-pdfs/${id}.pdf`,
       `${id}-hash`,
       123
     )
+}
+
+function insertLessonText(lessonId: string): void {
+  connection
+    .prepare(
+      `
+        INSERT INTO lesson_text_extractions (
+          lesson_id,
+          status,
+          full_text,
+          page_count,
+          character_count,
+          extractor_name,
+          extractor_version
+        )
+        VALUES (?, 'completed', ?, ?, ?, ?, ?)
+      `
+    )
+    .run(lessonId, 'Cardiac physiology text.', 1, 24, 'test', '1')
+
+  connection
+    .prepare(
+      `
+        INSERT INTO lesson_text_pages (lesson_id, page_number, text, character_count)
+        VALUES (?, ?, ?, ?)
+      `
+    )
+    .run(lessonId, 1, 'Cardiac physiology text.', 24)
 }
 
 function countRows(tableName: string): number {
