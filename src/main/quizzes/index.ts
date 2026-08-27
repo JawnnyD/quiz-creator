@@ -1,4 +1,10 @@
-import type { QuizAttempt, QuizQuestion, QuizRecord, QuizResult } from '../../shared/quizzes'
+import type {
+  DeleteQuizResult,
+  QuizAttempt,
+  QuizQuestion,
+  QuizRecord,
+  QuizResult
+} from '../../shared/quizzes'
 
 import { initializeDatabase } from '../db'
 import {
@@ -7,6 +13,7 @@ import {
 } from './generator'
 import {
   createQuizRecordFromDatabase,
+  deleteQuizFromDatabase,
   gradeQuizAnswersFromDatabase,
   listQuizAttemptsForLessonFromDatabase,
   listQuizzesForLessonFromDatabase,
@@ -25,6 +32,7 @@ export type {
   QuizAttempt,
   QuizChoice,
   QuizCreationSettings,
+  DeleteQuizResult,
   QuizDifficulty,
   QuizQuestion,
   QuizRecord,
@@ -40,6 +48,7 @@ export type { GenerateTemporaryQuizInput } from './generator'
 export { generateTemporaryQuizFromLessonTextFromDatabase } from './generator'
 export {
   createQuizRecordFromDatabase,
+  deleteQuizFromDatabase,
   gradeQuizAnswersFromDatabase,
   listQuizAttemptsForLessonFromDatabase,
   listQuizzesForLessonFromDatabase,
@@ -64,6 +73,10 @@ export function listQuizzesForLesson(lessonId: string): QuizRecord[] {
 
 export function updateQuizTitle(quizId: string, title: string): QuizRecord {
   return updateQuizTitleFromDatabase(initializeDatabase(), quizId, title)
+}
+
+export function deleteQuiz(quizId: string): DeleteQuizResult {
+  return deleteQuizFromDatabase(initializeDatabase(), quizId)
 }
 
 export function listQuizAttemptsForLesson(lessonId: string): QuizAttempt[] {

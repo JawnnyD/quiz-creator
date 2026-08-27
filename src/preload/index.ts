@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { AppError, decodeAppErrorFromIpc } from '../shared/errors'
 import type { DeleteLessonResult, LessonRecord } from '../shared/lessons'
 import type {
+  DeleteQuizResult,
   QuizAttempt,
   QuizCreationSettings,
   QuizQuestion,
@@ -24,26 +26,44 @@ interface QuizAnswerSubmission {
   selectedChoiceId: string
 }
 
+async function invokeAppApi<T>(channel: string, ...args: unknown[]): Promise<T> {
+  try {
+    return (await ipcRenderer.invoke(channel, ...args)) as T
+  } catch (error) {
+    const appError = decodeAppErrorFromIpc(error)
+
+    if (appError !== null) {
+      throw appError
+    }
+
+    throw new AppError('unexpected', 'Something went wrong.')
+  }
+}
+
 const api = {
-  importLessonPdf: (): Promise<LessonRecord | null> => ipcRenderer.invoke('lessons:importPdf'),
-  listLessons: (): Promise<LessonRecord[]> => ipcRenderer.invoke('lessons:list'),
+  importLessonPdf: (): Promise<LessonRecord | null> =>
+    invokeAppApi<LessonRecord | null>('lessons:importPdf'),
+  listLessons: (): Promise<LessonRecord[]> => invokeAppApi<LessonRecord[]>('lessons:list'),
   updateLessonTitle: (id: string, title: string): Promise<LessonRecord> =>
-    ipcRenderer.invoke('lessons:updateTitle', id, title),
+    invokeAppApi<LessonRecord>('lessons:updateTitle', id, title),
   deleteLesson: (id: string): Promise<DeleteLessonResult> =>
-    ipcRenderer.invoke('lessons:delete', id),
+    invokeAppApi<DeleteLessonResult>('lessons:delete', id),
   createQuiz: (input: GenerateTemporaryQuizInput): Promise<FullQuiz> =>
-    ipcRenderer.invoke('quizzes:create', input),
+    invokeAppApi<FullQuiz>('quizzes:create', input),
   listQuizzesForLesson: (lessonId: string): Promise<QuizRecord[]> =>
-    ipcRenderer.invoke('quizzes:listForLesson', lessonId),
+    invokeAppApi<QuizRecord[]>('quizzes:listForLesson', lessonId),
   updateQuizTitle: (id: string, title: string): Promise<QuizRecord> =>
-    ipcRenderer.invoke('quizzes:updateTitle', id, title),
+    invokeAppApi<QuizRecord>('quizzes:updateTitle', id, title),
+  deleteQuiz: (id: string): Promise<DeleteQuizResult> =>
+    invokeAppApi<DeleteQuizResult>('quizzes:delete', id),
   listQuizAttemptsForLesson: (lessonId: string): Promise<QuizAttempt[]> =>
-    ipcRenderer.invoke('quizzes:listAttemptsForLesson', lessonId),
-  getQuiz: (quizId: string): Promise<FullQuiz | null> => ipcRenderer.invoke('quizzes:get', quizId),
+    invokeAppApi<QuizAttempt[]>('quizzes:listAttemptsForLesson', lessonId),
+  getQuiz: (quizId: string): Promise<FullQuiz | null> =>
+    invokeAppApi<FullQuiz | null>('quizzes:get', quizId),
   getQuizAttemptResult: (attemptId: string): Promise<QuizResult | null> =>
-    ipcRenderer.invoke('quizzes:getAttemptResult', attemptId),
+    invokeAppApi<QuizResult | null>('quizzes:getAttemptResult', attemptId),
   submitQuizAttempt: (quizId: string, answers: QuizAnswerSubmission[]): Promise<QuizResult> =>
-    ipcRenderer.invoke('quizzes:submitAttempt', quizId, answers)
+    invokeAppApi<QuizResult>('quizzes:submitAttempt', quizId, answers)
 }
 
 if (process.contextIsolated) {

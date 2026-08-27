@@ -10,6 +10,10 @@ export interface QuizRecord {
   updatedAt: string
 }
 
+export interface DeleteQuizResult {
+  deleted: boolean
+}
+
 export interface QuizChoice {
   id: string
   questionId: string

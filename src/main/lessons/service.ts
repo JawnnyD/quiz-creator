@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync
 import type { DatabaseSync } from 'node:sqlite'
 import { basename, extname, isAbsolute, join, parse, relative, resolve } from 'path'
 
+import { AppError } from '../../shared/errors'
 import type { DeleteLessonResult, LessonRecord, TextExtractionStatus } from '../../shared/lessons'
 import { extractPdfText, type ExtractedPdfText } from './textExtraction'
 
@@ -74,17 +75,17 @@ export async function importLessonPdfWithStorage(
   const resolvedSourcePath = resolve(sourcePath)
 
   if (!existsSync(resolvedSourcePath)) {
-    throw new Error(`Lesson PDF source does not exist: ${resolvedSourcePath}`)
+    throw new AppError('validation_failed', 'Selected lesson PDF does not exist.')
   }
 
   const sourceStats = statSync(resolvedSourcePath)
 
   if (!sourceStats.isFile()) {
-    throw new Error(`Lesson PDF source is not a file: ${resolvedSourcePath}`)
+    throw new AppError('validation_failed', 'Selected lesson PDF is not a file.')
   }
 
   if (extname(resolvedSourcePath).toLowerCase() !== '.pdf') {
-    throw new Error(`Lesson file must be a PDF: ${resolvedSourcePath}`)
+    throw new AppError('validation_failed', 'Lesson file must be a PDF.')
   }
 
   const contentHash = hashFile(resolvedSourcePath)
@@ -133,7 +134,7 @@ export async function importLessonPdfWithStorage(
   const createdLesson = findLessonById(connection, id)
 
   if (createdLesson === null) {
-    throw new Error(`Imported lesson was not found after insert: ${id}`)
+    throw new AppError('unexpected', 'Imported lesson could not be loaded after saving.')
   }
 
   return createdLesson
@@ -154,6 +155,13 @@ export function listLessonsFromDatabase(connection: DatabaseSync): LessonRecord[
   return rows.map(mapLessonRow)
 }
 
+export function getLessonFromDatabase(
+  connection: DatabaseSync,
+  lessonId: string
+): LessonRecord | null {
+  return findLessonById(connection, lessonId)
+}
+
 export function updateLessonTitleFromDatabase(
   connection: DatabaseSync,
   lessonId: string,
@@ -163,15 +171,15 @@ export function updateLessonTitleFromDatabase(
   const normalizedTitle = title.trim()
 
   if (normalizedLessonId.length === 0) {
-    throw new Error('Lesson id is required to update a lesson title')
+    throw new AppError('validation_failed', 'Lesson id is required to update a lesson title.')
   }
 
   if (normalizedTitle.length === 0) {
-    throw new Error('Lesson title is required')
+    throw new AppError('validation_failed', 'Lesson title is required.')
   }
 
   if (findLessonById(connection, normalizedLessonId) === null) {
-    throw new Error(`Lesson was not found for title update: ${normalizedLessonId}`)
+    throw new AppError('lesson_not_found', 'This lesson is no longer available.')
   }
 
   connection
@@ -187,7 +195,7 @@ export function updateLessonTitleFromDatabase(
   const updatedLesson = findLessonById(connection, normalizedLessonId)
 
   if (updatedLesson === null) {
-    throw new Error(`Updated lesson was not found after title update: ${normalizedLessonId}`)
+    throw new AppError('lesson_not_found', 'This lesson is no longer available.')
   }
 
   return updatedLesson
@@ -201,7 +209,7 @@ export async function extractAndStoreLessonTextWithStorage(
   const lessonRow = findLessonRowById(connection, lessonId)
 
   if (lessonRow === null) {
-    throw new Error(`Lesson was not found for text extraction: ${lessonId}`)
+    throw new AppError('lesson_not_found', 'This lesson is no longer available.')
   }
 
   try {

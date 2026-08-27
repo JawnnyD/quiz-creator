@@ -1,5 +1,6 @@
 import type { DeleteLessonResult, LessonRecord } from '../shared/lessons'
 import type {
+  DeleteQuizResult,
   QuizAttempt,
   QuizCreationSettings,
   QuizQuestion,
@@ -31,6 +32,7 @@ export interface AppAPI {
   createQuiz: (input: GenerateTemporaryQuizInput) => Promise<FullQuiz>
   listQuizzesForLesson: (lessonId: string) => Promise<QuizRecord[]>
   updateQuizTitle: (id: string, title: string) => Promise<QuizRecord>
+  deleteQuiz: (id: string) => Promise<DeleteQuizResult>
   listQuizAttemptsForLesson: (lessonId: string) => Promise<QuizAttempt[]>
   getQuiz: (quizId: string) => Promise<FullQuiz | null>
   getQuizAttemptResult: (attemptId: string) => Promise<QuizResult | null>

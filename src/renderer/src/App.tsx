@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent } from 'react'
+import { isAppError, type AppErrorCode } from '../../shared/errors'
 import type { LessonRecord } from '../../shared/lessons'
 import type { QuizAttempt, QuizDifficulty, QuizRecord, QuizResult } from '../../shared/quizzes'
 
@@ -31,6 +32,7 @@ function App(): JSX.Element {
   const [isLoading, setIsLoading] = useState(true)
   const [isImporting, setIsImporting] = useState(false)
   const [deletingLessonIds, setDeletingLessonIds] = useState<Set<string>>(() => new Set())
+  const [deletingQuizIds, setDeletingQuizIds] = useState<Set<string>>(() => new Set())
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null)
   const [quizzes, setQuizzes] = useState<QuizRecord[]>([])
   const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>([])
@@ -126,6 +128,24 @@ function App(): JSX.Element {
         }
       } catch (error) {
         if (!isCanceled) {
+          if (isAppErrorWithCode(error, 'lesson_not_found')) {
+            setLessons((currentLessons) =>
+              currentLessons.filter((lesson) => lesson.id !== lessonId)
+            )
+            setActiveLessonId(null)
+            setQuizzes([])
+            setQuizAttempts([])
+            setActiveAttemptHistoryQuizId(null)
+            setActiveQuiz(null)
+            setSelectedChoiceIdsByQuestionId({})
+            setQuizResult(null)
+            setIsLoadingActiveQuiz(false)
+            setIsSubmittingQuizAttempt(false)
+            setQuizTakingErrorMessage(null)
+            setStatusMessage('This lesson is no longer available.')
+            return
+          }
+
           setQuizErrorMessage(getErrorMessage(error))
         }
       } finally {
@@ -148,6 +168,24 @@ function App(): JSX.Element {
         }
       } catch (error) {
         if (!isCanceled) {
+          if (isAppErrorWithCode(error, 'lesson_not_found')) {
+            setLessons((currentLessons) =>
+              currentLessons.filter((lesson) => lesson.id !== lessonId)
+            )
+            setActiveLessonId(null)
+            setQuizzes([])
+            setQuizAttempts([])
+            setActiveAttemptHistoryQuizId(null)
+            setActiveQuiz(null)
+            setSelectedChoiceIdsByQuestionId({})
+            setQuizResult(null)
+            setIsLoadingActiveQuiz(false)
+            setIsSubmittingQuizAttempt(false)
+            setQuizTakingErrorMessage(null)
+            setStatusMessage('This lesson is no longer available.')
+            return
+          }
+
           setQuizAttemptErrorMessage(getErrorMessage(error))
         }
       } finally {
@@ -213,12 +251,13 @@ function App(): JSX.Element {
     activeQuiz?.questions.filter(
       (question) => selectedChoiceIdsByQuestionId[question.id] !== undefined
     ).length ?? 0
+  const unansweredQuestionCount =
+    activeQuiz === null ? 0 : activeQuiz.questions.length - answeredQuestionCount
   const canSubmitQuizAttempt =
     activeQuiz !== null &&
     quizResult === null &&
     !isSubmittingQuizAttempt &&
-    activeQuiz.questions.length > 0 &&
-    answeredQuestionCount === activeQuiz.questions.length
+    activeQuiz.questions.length > 0
   const resultAnswersByQuestionId = useMemo(() => {
     const answersByQuestionId = new Map<string, QuizResult['answers'][number]>()
 
@@ -251,6 +290,48 @@ function App(): JSX.Element {
     setTitleEditTarget(null)
     setTitleDraft('')
     setTitleEditErrorMessage(null)
+  }
+
+  const handleLessonUnavailable = (lessonId: string): void => {
+    setLessons((currentLessons) => currentLessons.filter((lesson) => lesson.id !== lessonId))
+
+    if (activeLessonId === lessonId) {
+      setActiveLessonId(null)
+      setQuizzes([])
+      setQuizAttempts([])
+      setActiveAttemptHistoryQuizId(null)
+      resetQuizTakingState()
+    }
+
+    clearTitleEditState()
+    setStatusMessage('This lesson is no longer available.')
+  }
+
+  const removeQuizFromState = (quizId: string): void => {
+    setQuizzes((currentQuizzes) => currentQuizzes.filter((quiz) => quiz.id !== quizId))
+    setQuizAttempts((currentAttempts) =>
+      currentAttempts.filter((attempt) => attempt.quizId !== quizId)
+    )
+  }
+
+  const clearQuizUiState = (quizId: string): void => {
+    removeQuizFromState(quizId)
+
+    if (activeQuiz?.quiz.id === quizId || activeAttemptHistoryQuizId === quizId) {
+      setActiveAttemptHistoryQuizId(null)
+      resetQuizTakingState()
+    }
+
+    if (titleEditTarget?.kind === 'quiz' && titleEditTarget.id === quizId) {
+      clearTitleEditState()
+    }
+  }
+
+  const handleQuizUnavailable = (quizId: string): void => {
+    clearQuizUiState(quizId)
+    setQuizErrorMessage(null)
+    setQuizAttemptErrorMessage(null)
+    setStatusMessage('This quiz is no longer available.')
   }
 
   const startTitleEdit = (kind: TitleEditTargetKind, id: string, currentTitle: string): void => {
@@ -311,6 +392,16 @@ function App(): JSX.Element {
 
       clearTitleEditState()
     } catch (error) {
+      if (titleEditTarget.kind === 'lesson' && isAppErrorWithCode(error, 'lesson_not_found')) {
+        handleLessonUnavailable(titleEditTarget.id)
+        return
+      }
+
+      if (titleEditTarget.kind === 'quiz' && isAppErrorWithCode(error, 'quiz_not_found')) {
+        handleQuizUnavailable(titleEditTarget.id)
+        return
+      }
+
       setTitleEditErrorMessage(getErrorMessage(error))
     } finally {
       setIsSavingTitle(false)
@@ -399,7 +490,7 @@ function App(): JSX.Element {
 
       if (importedLesson.textExtractionStatus === 'failed') {
         setErrorMessage(
-          `${wasAlreadyImported ? 'Loaded' : 'Imported'} "${importedLesson.title}", but text extraction failed: ${importedLesson.textExtractionError ?? 'Unknown error'}`
+          `${wasAlreadyImported ? 'Loaded' : 'Imported'} "${importedLesson.title}", but text extraction failed.`
         )
       } else if (
         importedLesson.textExtractionStatus === 'completed' &&
@@ -448,6 +539,11 @@ function App(): JSX.Element {
       setActiveAttemptHistoryQuizId(null)
       setStatusMessage(`Generated "${createdQuiz.quiz.title}" for "${activeLesson.title}".`)
     } catch (error) {
+      if (isAppErrorWithCode(error, 'lesson_not_found')) {
+        handleLessonUnavailable(activeLesson.id)
+        return
+      }
+
       setQuizErrorMessage(getErrorMessage(error))
     } finally {
       setIsCreatingQuiz(false)
@@ -499,13 +595,18 @@ function App(): JSX.Element {
       }
 
       if (loadedQuiz === null) {
-        setQuizTakingErrorMessage('Quiz was not found.')
+        handleQuizUnavailable(quizId)
         return
       }
 
       setActiveQuiz(randomizeQuizForAttempt(loadedQuiz))
     } catch (error) {
       if (quizLoadRequestIdRef.current === requestId) {
+        if (isAppErrorWithCode(error, 'quiz_not_found')) {
+          handleQuizUnavailable(quizId)
+          return
+        }
+
         setQuizTakingErrorMessage(getErrorMessage(error))
       }
     } finally {
@@ -551,7 +652,12 @@ function App(): JSX.Element {
       }
 
       if (loadedResult === null) {
-        setQuizTakingErrorMessage('Quiz attempt was not found.')
+        if (activeAttemptHistoryQuizId !== null) {
+          handleQuizUnavailable(activeAttemptHistoryQuizId)
+        } else {
+          setQuizTakingErrorMessage('This quiz attempt is no longer available.')
+        }
+
         return
       }
 
@@ -564,6 +670,11 @@ function App(): JSX.Element {
       })
     } catch (error) {
       if (quizLoadRequestIdRef.current === requestId) {
+        if (isAppErrorWithCode(error, 'quiz_not_found') && activeAttemptHistoryQuizId !== null) {
+          handleQuizUnavailable(activeAttemptHistoryQuizId)
+          return
+        }
+
         setQuizTakingErrorMessage(getErrorMessage(error))
       }
     } finally {
@@ -593,6 +704,7 @@ function App(): JSX.Element {
       return
     }
 
+    setQuizTakingErrorMessage(null)
     setSelectedChoiceIdsByQuestionId((currentAnswers) => ({
       ...currentAnswers,
       [questionId]: choiceId
@@ -601,6 +713,13 @@ function App(): JSX.Element {
 
   const submitQuizAttempt = async (): Promise<void> => {
     if (activeQuiz === null || !canSubmitQuizAttempt) {
+      return
+    }
+
+    if (unansweredQuestionCount > 0) {
+      setQuizTakingErrorMessage(
+        `Answer every question before submitting. ${unansweredQuestionCount} remaining.`
+      )
       return
     }
 
@@ -617,6 +736,11 @@ function App(): JSX.Element {
       setQuizResult(result)
       setQuizAttempts((currentAttempts) => upsertQuizAttempt(currentAttempts, result.attempt))
     } catch (error) {
+      if (isAppErrorWithCode(error, 'quiz_not_found')) {
+        handleQuizUnavailable(activeQuiz.quiz.id)
+        return
+      }
+
       setQuizTakingErrorMessage(getErrorMessage(error))
     } finally {
       setIsSubmittingQuizAttempt(false)
@@ -645,6 +769,18 @@ function App(): JSX.Element {
         currentLessons.filter((currentLesson) => currentLesson.id !== lesson.id)
       )
 
+      if (activeLessonId === lesson.id) {
+        setActiveLessonId(null)
+        setQuizzes([])
+        setQuizAttempts([])
+        setActiveAttemptHistoryQuizId(null)
+        resetQuizTakingState()
+      }
+
+      if (titleEditTarget?.kind === 'lesson' && titleEditTarget.id === lesson.id) {
+        clearTitleEditState()
+      }
+
       if (!result.deleted) {
         setStatusMessage(`"${lesson.title}" was already deleted.`)
         return
@@ -665,6 +801,43 @@ function App(): JSX.Element {
     }
   }
 
+  const deleteQuiz = async (quiz: QuizRecord): Promise<void> => {
+    const confirmed = window.confirm(
+      `Delete "${quiz.title}"?\n\nThis removes the quiz and all saved attempts.`
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setStatusMessage(null)
+    setErrorMessage(null)
+    setQuizErrorMessage(null)
+    setQuizAttemptErrorMessage(null)
+    setQuizDeleting(quiz.id, true)
+
+    try {
+      const result = await window.api.deleteQuiz(quiz.id)
+
+      if (!result.deleted) {
+        handleQuizUnavailable(quiz.id)
+        return
+      }
+
+      clearQuizUiState(quiz.id)
+      setStatusMessage(`Deleted "${quiz.title}".`)
+    } catch (error) {
+      if (isAppErrorWithCode(error, 'quiz_not_found')) {
+        handleQuizUnavailable(quiz.id)
+        return
+      }
+
+      setQuizErrorMessage(getErrorMessage(error))
+    } finally {
+      setQuizDeleting(quiz.id, false)
+    }
+  }
+
   const setLessonDeleting = (lessonId: string, isDeleting: boolean): void => {
     setDeletingLessonIds((currentLessonIds) => {
       const nextLessonIds = new Set(currentLessonIds)
@@ -676,6 +849,20 @@ function App(): JSX.Element {
       }
 
       return nextLessonIds
+    })
+  }
+
+  const setQuizDeleting = (quizId: string, isDeleting: boolean): void => {
+    setDeletingQuizIds((currentQuizIds) => {
+      const nextQuizIds = new Set(currentQuizIds)
+
+      if (isDeleting) {
+        nextQuizIds.add(quizId)
+      } else {
+        nextQuizIds.delete(quizId)
+      }
+
+      return nextQuizIds
     })
   }
 
@@ -1178,9 +1365,9 @@ function App(): JSX.Element {
               </div>
             </header>
 
-            {activeLesson.textExtractionError !== null ? (
+            {activeLesson.textExtractionStatus === 'failed' ? (
               <p className="detail-alert" role="alert">
-                {activeLesson.textExtractionError}
+                Text extraction failed. Quiz generation is unavailable for this lesson.
               </p>
             ) : null}
 
@@ -1227,6 +1414,16 @@ function App(): JSX.Element {
                                   <span>{formatQuizDifficulty(quiz.difficulty)}</span>
                                 </span>
                               </div>
+                              <button
+                                className="delete-button"
+                                type="button"
+                                onClick={() => {
+                                  void deleteQuiz(quiz)
+                                }}
+                                disabled={deletingQuizIds.has(quiz.id)}
+                              >
+                                {deletingQuizIds.has(quiz.id) ? 'Deleting...' : 'Delete'}
+                              </button>
                             </div>
                           ) : (
                             <div className="quiz-item">
@@ -1257,6 +1454,16 @@ function App(): JSX.Element {
                                 disabled={isSavingTitle}
                               >
                                 Edit
+                              </button>
+                              <button
+                                className="delete-button"
+                                type="button"
+                                onClick={() => {
+                                  void deleteQuiz(quiz)
+                                }}
+                                disabled={deletingQuizIds.has(quiz.id)}
+                              >
+                                {deletingQuizIds.has(quiz.id) ? 'Deleting...' : 'Delete'}
                               </button>
                             </div>
                           )}
@@ -1485,7 +1692,15 @@ function getQuestionExplanationText(explanation: string | null): string | null {
 }
 
 function getErrorMessage(error: unknown): string {
+  if (isAppError(error)) {
+    return error.message
+  }
+
   return error instanceof Error ? error.message : String(error)
+}
+
+function isAppErrorWithCode(error: unknown, code: AppErrorCode): boolean {
+  return isAppError(error) && error.code === code
 }
 
 export default App

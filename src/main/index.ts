@@ -3,6 +3,7 @@ import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { encodeAppErrorForIpc } from '../shared/errors'
 import { closeDatabase, initializeDatabase } from './db'
 import {
   deleteLesson,
@@ -13,6 +14,7 @@ import {
   type LessonRecord
 } from './lessons'
 import {
+  deleteQuiz,
   generateTemporaryQuizFromLessonText,
   listQuizAttemptsForLesson,
   listQuizzesForLesson,
@@ -22,6 +24,7 @@ import {
   updateQuizTitle,
   type FullQuiz,
   type GenerateTemporaryQuizInput,
+  type DeleteQuizResult,
   type QuizAnswerSubmission,
   type QuizAttempt,
   type QuizRecord,
@@ -58,6 +61,10 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+}
+
+function createIpcError(error: unknown, fallbackMessage: string): Error {
+  return new Error(encodeAppErrorForIpc(error, fallbackMessage))
 }
 
 // This method will be called when Electron has finished
@@ -106,8 +113,7 @@ app.whenReady().then(() => {
     try {
       return await importLessonPdf(selectedPdfPath)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to import lesson PDF: ${message}`)
+      throw createIpcError(error, 'Unable to import lesson PDF.')
     }
   })
 
@@ -115,8 +121,7 @@ app.whenReady().then(() => {
     try {
       return listLessons()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to load lessons: ${message}`)
+      throw createIpcError(error, 'Unable to load lessons.')
     }
   })
 
@@ -124,8 +129,7 @@ app.whenReady().then(() => {
     try {
       return updateLessonTitle(lessonId, title)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to update lesson title: ${message}`)
+      throw createIpcError(error, 'Unable to update lesson title.')
     }
   })
 
@@ -133,8 +137,7 @@ app.whenReady().then(() => {
     try {
       return deleteLesson(lessonId)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to delete lesson: ${message}`)
+      throw createIpcError(error, 'Unable to delete lesson.')
     }
   })
 
@@ -144,8 +147,7 @@ app.whenReady().then(() => {
       try {
         return await generateTemporaryQuizFromLessonText(input)
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        throw new Error(`Unable to create quiz: ${message}`)
+        throw createIpcError(error, 'Unable to create quiz.')
       }
     }
   )
@@ -154,8 +156,7 @@ app.whenReady().then(() => {
     try {
       return listQuizzesForLesson(lessonId)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to load quizzes: ${message}`)
+      throw createIpcError(error, 'Unable to load quizzes.')
     }
   })
 
@@ -163,8 +164,15 @@ app.whenReady().then(() => {
     try {
       return updateQuizTitle(quizId, title)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to update quiz title: ${message}`)
+      throw createIpcError(error, 'Unable to update quiz title.')
+    }
+  })
+
+  ipcMain.handle('quizzes:delete', (_, quizId: string): DeleteQuizResult => {
+    try {
+      return deleteQuiz(quizId)
+    } catch (error) {
+      throw createIpcError(error, 'Unable to delete quiz.')
     }
   })
 
@@ -172,8 +180,7 @@ app.whenReady().then(() => {
     try {
       return listQuizAttemptsForLesson(lessonId)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to load quiz attempts: ${message}`)
+      throw createIpcError(error, 'Unable to load quiz attempts.')
     }
   })
 
@@ -181,8 +188,7 @@ app.whenReady().then(() => {
     try {
       return loadFullQuiz(quizId)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to load quiz: ${message}`)
+      throw createIpcError(error, 'Unable to load quiz.')
     }
   })
 
@@ -190,8 +196,7 @@ app.whenReady().then(() => {
     try {
       return loadQuizAttemptResult(attemptId)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Unable to load quiz attempt: ${message}`)
+      throw createIpcError(error, 'Unable to load quiz attempt.')
     }
   })
 
@@ -201,8 +206,7 @@ app.whenReady().then(() => {
       try {
         return submitQuizAttempt(quizId, answers)
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        throw new Error(`Unable to submit quiz attempt: ${message}`)
+        throw createIpcError(error, 'Unable to submit quiz attempt.')
       }
     }
   )

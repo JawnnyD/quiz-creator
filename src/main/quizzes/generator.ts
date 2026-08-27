@@ -2,8 +2,10 @@ import { randomInt } from 'crypto'
 import OpenAI from 'openai'
 import type { DatabaseSync } from 'node:sqlite'
 
+import { AppError, isAppError } from '../../shared/errors'
 import type { QuizCreationSettings, QuizDifficulty } from '../../shared/quizzes'
 import {
+  getLessonFromDatabase,
   getLessonTextForQuizGenerationFromDatabase,
   type LessonTextForQuizGeneration
 } from '../lessons/service'
@@ -21,6 +23,8 @@ const requiredChoicesPerQuestion = 5
 const easyModel = 'gpt-5.6-luna'
 const advancedModel = 'gpt-5.6-terra'
 const openAiApiKeyEnvironmentVariableName = 'OPENAI_API_KEY'
+const aiResponseMalformedMessage =
+  'The AI returned a quiz format this app could not use. Try generating again.'
 
 const defaultQuizSettings = {
   questionCount: 10,
@@ -56,18 +60,45 @@ export async function generateTemporaryQuizFromLessonTextFromDatabase(
   const lessonId = input.lessonId.trim()
 
   if (lessonId.length === 0) {
-    throw new Error('Lesson id is required to generate a quiz')
+    throw new AppError('validation_failed', 'Lesson id is required to generate a quiz.')
   }
 
   const settings = normalizeQuizSettings(input.settings)
+  const lesson = getLessonFromDatabase(connection, lessonId)
+
+  if (lesson === null) {
+    throw new AppError('lesson_not_found', 'This lesson is no longer available.')
+  }
+
+  if (lesson.textExtractionStatus === 'failed') {
+    throw new AppError(
+      'lesson_text_extraction_failed',
+      'Quiz generation is unavailable because text extraction failed.'
+    )
+  }
+
+  if (lesson.textExtractionStatus === 'not_started') {
+    throw new AppError('lesson_text_unavailable', 'Lesson text is not ready yet.')
+  }
+
+  if (lesson.textCharacterCount === 0) {
+    throw new AppError(
+      'lesson_text_empty',
+      'Quiz generation is unavailable because no selectable text was found.'
+    )
+  }
+
   const lessonText = getLessonTextForQuizGenerationFromDatabase(connection, lessonId)
 
   if (lessonText === null) {
-    throw new Error(`Completed lesson text was not found for quiz generation: ${lessonId}`)
+    throw new AppError('lesson_text_unavailable', 'Lesson text is not ready yet.')
   }
 
   if (normalizeWhitespace(lessonText.fullText).length === 0) {
-    throw new Error(`Lesson text is empty for quiz generation: ${lessonId}`)
+    throw new AppError(
+      'lesson_text_empty',
+      'Quiz generation is unavailable because no selectable text was found.'
+    )
   }
 
   const generatedQuiz = await generateQuizWithOpenAi(lessonText, settings)
@@ -91,7 +122,7 @@ export async function generateTemporaryQuizFromLessonTextFromDatabase(
   const fullQuiz = loadFullQuizFromDatabase(connection, quiz.id)
 
   if (fullQuiz === null) {
-    throw new Error(`Generated quiz was not found after saving questions: ${quiz.id}`)
+    throw new AppError('unexpected', 'The generated quiz could not be loaded after saving.')
   }
 
   return fullQuiz
@@ -106,19 +137,25 @@ function normalizeQuizSettings(
   const customDifficultyInstructions = settings?.customDifficultyInstructions?.trim() ?? ''
 
   if (!Number.isInteger(questionCount) || questionCount <= 0) {
-    throw new Error('Temporary quiz question count must be a positive integer')
+    throw new AppError('validation_failed', 'Choose at least 1 question.')
   }
 
   if (questionCount > maxTemporaryQuizQuestionCount) {
-    throw new Error(`Temporary quiz question count cannot exceed ${maxTemporaryQuizQuestionCount}`)
+    throw new AppError(
+      'validation_failed',
+      `Question count cannot exceed ${maxTemporaryQuizQuestionCount}.`
+    )
   }
 
   if (!Number.isInteger(choicesPerQuestion) || choicesPerQuestion !== requiredChoicesPerQuestion) {
-    throw new Error(`AI-generated quizzes must use exactly ${requiredChoicesPerQuestion} choices`)
+    throw new AppError(
+      'validation_failed',
+      `AI-generated quizzes must use exactly ${requiredChoicesPerQuestion} choices.`
+    )
   }
 
   if (difficulty !== 'easy' && difficulty !== 'nbme' && difficulty !== 'custom') {
-    throw new Error(`Unsupported quiz difficulty: ${String(difficulty)}`)
+    throw new AppError('validation_failed', 'Choose a supported quiz difficulty.')
   }
 
   return {
@@ -134,45 +171,57 @@ async function generateQuizWithOpenAi(
   settings: NormalizedQuizSettings
 ): Promise<GeneratedQuiz> {
   const client = getOpenAiClient()
-  const response = await client.responses.create({
-    model: getModelForDifficulty(settings.difficulty),
-    instructions: buildGeneratorInstructions(settings),
-    input: buildGeneratorInput(lessonText, settings),
-    max_output_tokens: getMaxOutputTokens(settings.questionCount),
-    store: false,
-    text: {
-      format: {
-        type: 'json_schema',
-        name: 'medical_practice_quiz',
-        strict: true,
-        schema: buildGeneratedQuizSchema()
+
+  try {
+    const response = await client.responses.create({
+      model: getModelForDifficulty(settings.difficulty),
+      instructions: buildGeneratorInstructions(settings),
+      input: buildGeneratorInput(lessonText, settings),
+      max_output_tokens: getMaxOutputTokens(settings.questionCount),
+      store: false,
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'medical_practice_quiz',
+          strict: true,
+          schema: buildGeneratedQuizSchema()
+        }
       }
+    })
+
+    if (response.status !== 'completed') {
+      throw new AppError('ai_generation_failed', 'Quiz generation did not complete. Try again.')
     }
-  })
 
-  if (response.status !== 'completed') {
-    const reason =
-      response.error?.message ?? response.incomplete_details?.reason ?? 'Unknown completion status'
+    const responseText = response.output_text.trim()
 
-    throw new Error(`OpenAI quiz generation did not complete: ${reason}`)
+    if (responseText.length === 0) {
+      throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
+    }
+
+    const generatedQuiz = validateGeneratedQuiz(parseGeneratedQuizJson(responseText), settings)
+
+    return randomizeGeneratedQuizChoices(generatedQuiz)
+  } catch (error) {
+    if (isAppError(error)) {
+      throw error
+    }
+
+    throw new AppError(
+      'ai_generation_failed',
+      'Quiz generation failed. Check your connection and API key, then try again.'
+    )
   }
-
-  const responseText = response.output_text.trim()
-
-  if (responseText.length === 0) {
-    throw new Error('OpenAI quiz generation returned an empty response')
-  }
-
-  const generatedQuiz = validateGeneratedQuiz(parseGeneratedQuizJson(responseText), settings)
-
-  return randomizeGeneratedQuizChoices(generatedQuiz)
 }
 
 function getOpenAiClient(): OpenAI {
   const apiKey = process.env[openAiApiKeyEnvironmentVariableName]?.trim()
 
   if (apiKey === undefined || apiKey.length === 0) {
-    throw new Error(`${openAiApiKeyEnvironmentVariableName} is required to generate quizzes`)
+    throw new AppError(
+      'ai_generation_failed',
+      `${openAiApiKeyEnvironmentVariableName} is required to generate quizzes.`
+    )
   }
 
   openAiClient ??= new OpenAI({ apiKey })
@@ -360,25 +409,23 @@ function buildGeneratedQuizSchema(): { [key: string]: unknown } {
 
 function validateGeneratedQuiz(value: unknown, settings: NormalizedQuizSettings): GeneratedQuiz {
   if (!isRecord(value)) {
-    throw new Error('OpenAI quiz generation returned an invalid quiz object')
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
-  const title = getRequiredString(value, 'title', 'Generated quiz title')
+  const title = getRequiredString(value, 'title')
   const questionsValue = value['questions']
 
   if (!Array.isArray(questionsValue)) {
-    throw new Error('OpenAI quiz generation did not return a questions array')
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
   if (questionsValue.length !== settings.questionCount) {
-    throw new Error(
-      `OpenAI quiz generation returned ${questionsValue.length} questions instead of ${settings.questionCount}`
-    )
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
   const questionPrompts = new Set<string>()
-  const questions = questionsValue.map((questionValue, questionIndex) =>
-    validateGeneratedQuestion(questionValue, questionIndex, settings, questionPrompts)
+  const questions = questionsValue.map((questionValue) =>
+    validateGeneratedQuestion(questionValue, settings, questionPrompts)
   )
 
   return {
@@ -408,7 +455,7 @@ function shuffleChoices(
     const randomChoice = shuffledChoices[randomIndex]
 
     if (currentChoice === undefined || randomChoice === undefined) {
-      throw new Error('Unable to randomize generated quiz choices')
+      throw new AppError('unexpected', 'Unable to prepare generated quiz choices.')
     }
 
     shuffledChoices[index] = randomChoice
@@ -420,28 +467,19 @@ function shuffleChoices(
 
 function validateGeneratedQuestion(
   value: unknown,
-  questionIndex: number,
   settings: NormalizedQuizSettings,
   questionPrompts: Set<string>
 ): SaveQuizQuestionInput {
   if (!isRecord(value)) {
-    throw new Error(`Generated question ${questionIndex + 1} is not an object`)
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
-  const prompt = getRequiredString(
-    value,
-    'prompt',
-    `Generated question ${questionIndex + 1} prompt`
-  )
-  const explanation = getRequiredString(
-    value,
-    'explanation',
-    `Generated question ${questionIndex + 1} explanation`
-  )
+  const prompt = getRequiredString(value, 'prompt')
+  const explanation = getRequiredString(value, 'explanation')
   const promptKey = normalizeChoiceKey(prompt)
 
   if (questionPrompts.has(promptKey)) {
-    throw new Error(`Generated question ${questionIndex + 1} duplicates another question prompt`)
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
   questionPrompts.add(promptKey)
@@ -449,23 +487,21 @@ function validateGeneratedQuestion(
   const choicesValue = value['choices']
 
   if (!Array.isArray(choicesValue)) {
-    throw new Error(`Generated question ${questionIndex + 1} did not return a choices array`)
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
   if (choicesValue.length !== settings.choicesPerQuestion) {
-    throw new Error(
-      `Generated question ${questionIndex + 1} returned ${choicesValue.length} choices instead of ${settings.choicesPerQuestion}`
-    )
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
   const choiceTexts = new Set<string>()
   let correctChoiceCount = 0
-  const choices = choicesValue.map((choiceValue, choiceIndex) => {
-    const choice = validateGeneratedChoice(choiceValue, questionIndex, choiceIndex)
+  const choices = choicesValue.map((choiceValue) => {
+    const choice = validateGeneratedChoice(choiceValue)
     const choiceKey = normalizeChoiceKey(choice.choiceText)
 
     if (choiceTexts.has(choiceKey)) {
-      throw new Error(`Generated question ${questionIndex + 1} has duplicate answer choice text`)
+      throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
     }
 
     choiceTexts.add(choiceKey)
@@ -478,7 +514,7 @@ function validateGeneratedQuestion(
   })
 
   if (correctChoiceCount !== 1) {
-    throw new Error(`Generated question ${questionIndex + 1} must have exactly one correct answer`)
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
   return {
@@ -488,28 +524,16 @@ function validateGeneratedQuestion(
   }
 }
 
-function validateGeneratedChoice(
-  value: unknown,
-  questionIndex: number,
-  choiceIndex: number
-): SaveQuizQuestionInput['choices'][number] {
+function validateGeneratedChoice(value: unknown): SaveQuizQuestionInput['choices'][number] {
   if (!isRecord(value)) {
-    throw new Error(
-      `Generated question ${questionIndex + 1} choice ${choiceIndex + 1} is not an object`
-    )
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
-  const choiceText = getRequiredString(
-    value,
-    'choiceText',
-    `Generated question ${questionIndex + 1} choice ${choiceIndex + 1} text`
-  )
+  const choiceText = getRequiredString(value, 'choiceText')
   const isCorrect = value['isCorrect']
 
   if (typeof isCorrect !== 'boolean') {
-    throw new Error(
-      `Generated question ${questionIndex + 1} choice ${choiceIndex + 1} correctness must be a boolean`
-    )
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
   return {
@@ -518,17 +542,17 @@ function validateGeneratedChoice(
   }
 }
 
-function getRequiredString(value: Record<string, unknown>, key: string, label: string): string {
+function getRequiredString(value: Record<string, unknown>, key: string): string {
   const fieldValue = value[key]
 
   if (typeof fieldValue !== 'string') {
-    throw new Error(`${label} must be a string`)
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
   const trimmedValue = fieldValue.trim()
 
   if (trimmedValue.length === 0) {
-    throw new Error(`${label} is required`)
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 
   return trimmedValue
@@ -537,10 +561,8 @@ function getRequiredString(value: Record<string, unknown>, key: string, label: s
 function parseGeneratedQuizJson(value: string): unknown {
   try {
     return JSON.parse(value) as unknown
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-
-    throw new Error(`OpenAI quiz generation returned invalid JSON: ${message}`)
+  } catch {
+    throw new AppError('ai_response_malformed', aiResponseMalformedMessage)
   }
 }
 

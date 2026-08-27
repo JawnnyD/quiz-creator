@@ -617,7 +617,7 @@ body {
 
 .quiz-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: start;
   gap: 12px;
   width: 100%;
@@ -1131,5 +1131,4 @@ body {
   .quiz-question-count-controls {
     grid-template-columns: 1fr;
   }
-
 }

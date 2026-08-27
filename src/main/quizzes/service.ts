@@ -1,7 +1,9 @@
 import { randomUUID } from 'crypto'
 import type { DatabaseSync } from 'node:sqlite'
 
+import { AppError } from '../../shared/errors'
 import type {
+  DeleteQuizResult,
   QuizAttempt,
   QuizChoice,
   QuizDifficulty,
@@ -122,15 +124,15 @@ export function createQuizRecordFromDatabase(
   const difficulty = normalizeQuizDifficulty(input.difficulty)
 
   if (lessonId.length === 0) {
-    throw new Error('Lesson id is required to create a quiz')
+    throw new AppError('validation_failed', 'Lesson id is required to create a quiz.')
   }
 
   if (title.length === 0) {
-    throw new Error('Quiz title is required')
+    throw new AppError('validation_failed', 'Quiz title is required.')
   }
 
   if (!lessonExists(connection, lessonId)) {
-    throw new Error(`Lesson was not found for quiz creation: ${lessonId}`)
+    throw new AppError('lesson_not_found', 'This lesson is no longer available.')
   }
 
   const id = randomUUID()
@@ -147,7 +149,7 @@ export function createQuizRecordFromDatabase(
   const quiz = findQuizById(connection, id)
 
   if (quiz === null) {
-    throw new Error(`Created quiz was not found after insert: ${id}`)
+    throw new AppError('unexpected', 'The created quiz could not be loaded.')
   }
 
   return quiz
@@ -161,18 +163,18 @@ export function saveQuizQuestionsFromDatabase(
   const questions = validateQuestionInputs(input.questions)
 
   if (quizId.length === 0) {
-    throw new Error('Quiz id is required to save quiz questions')
+    throw new AppError('validation_failed', 'Quiz id is required to save quiz questions.')
   }
 
   try {
     connection.exec('BEGIN IMMEDIATE')
 
     if (findQuizById(connection, quizId) === null) {
-      throw new Error(`Quiz was not found for question saving: ${quizId}`)
+      throw new AppError('quiz_not_found', 'This quiz is no longer available.')
     }
 
     if (quizHasAttempts(connection, quizId)) {
-      throw new Error(`Cannot replace questions for quiz after attempts exist: ${quizId}`)
+      throw new AppError('validation_failed', 'Cannot replace questions after attempts exist.')
     }
 
     connection.prepare('DELETE FROM quiz_questions WHERE quiz_id = ?').run(quizId)
@@ -221,7 +223,7 @@ export function saveQuizQuestionsFromDatabase(
   const fullQuiz = loadFullQuizFromDatabase(connection, quizId)
 
   if (fullQuiz === null) {
-    throw new Error(`Quiz was not found after saving questions: ${quizId}`)
+    throw new AppError('quiz_not_found', 'This quiz is no longer available.')
   }
 
   return fullQuiz.questions
@@ -231,6 +233,16 @@ export function listQuizzesForLessonFromDatabase(
   connection: DatabaseSync,
   lessonId: string
 ): QuizRecord[] {
+  const normalizedLessonId = lessonId.trim()
+
+  if (normalizedLessonId.length === 0) {
+    throw new AppError('validation_failed', 'Lesson id is required to load quizzes.')
+  }
+
+  if (!lessonExists(connection, normalizedLessonId)) {
+    throw new AppError('lesson_not_found', 'This lesson is no longer available.')
+  }
+
   const rows = connection
     .prepare(
       `
@@ -240,7 +252,7 @@ export function listQuizzesForLessonFromDatabase(
         ORDER BY created_at DESC, title ASC
       `
     )
-    .all(lessonId) as unknown as QuizRow[]
+    .all(normalizedLessonId) as unknown as QuizRow[]
 
   return rows.map(mapQuizRow)
 }
@@ -254,15 +266,15 @@ export function updateQuizTitleFromDatabase(
   const normalizedTitle = title.trim()
 
   if (normalizedQuizId.length === 0) {
-    throw new Error('Quiz id is required to update a quiz title')
+    throw new AppError('validation_failed', 'Quiz id is required to update a quiz title.')
   }
 
   if (normalizedTitle.length === 0) {
-    throw new Error('Quiz title is required')
+    throw new AppError('validation_failed', 'Quiz title is required.')
   }
 
   if (findQuizById(connection, normalizedQuizId) === null) {
-    throw new Error(`Quiz was not found for title update: ${normalizedQuizId}`)
+    throw new AppError('quiz_not_found', 'This quiz is no longer available.')
   }
 
   connection
@@ -278,16 +290,46 @@ export function updateQuizTitleFromDatabase(
   const updatedQuiz = findQuizById(connection, normalizedQuizId)
 
   if (updatedQuiz === null) {
-    throw new Error(`Updated quiz was not found after title update: ${normalizedQuizId}`)
+    throw new AppError('quiz_not_found', 'This quiz is no longer available.')
   }
 
   return updatedQuiz
+}
+
+export function deleteQuizFromDatabase(connection: DatabaseSync, quizId: string): DeleteQuizResult {
+  const normalizedQuizId = quizId.trim()
+
+  if (normalizedQuizId.length === 0) {
+    throw new AppError('validation_failed', 'Quiz id is required to delete a quiz.')
+  }
+
+  if (findQuizById(connection, normalizedQuizId) === null) {
+    return {
+      deleted: false
+    }
+  }
+
+  connection.prepare('DELETE FROM quizzes WHERE id = ?').run(normalizedQuizId)
+
+  return {
+    deleted: true
+  }
 }
 
 export function listQuizAttemptsForLessonFromDatabase(
   connection: DatabaseSync,
   lessonId: string
 ): QuizAttempt[] {
+  const normalizedLessonId = lessonId.trim()
+
+  if (normalizedLessonId.length === 0) {
+    throw new AppError('validation_failed', 'Lesson id is required to load quiz attempts.')
+  }
+
+  if (!lessonExists(connection, normalizedLessonId)) {
+    throw new AppError('lesson_not_found', 'This lesson is no longer available.')
+  }
+
   const rows = connection
     .prepare(
       `
@@ -305,7 +347,7 @@ export function listQuizAttemptsForLessonFromDatabase(
         ORDER BY quiz_attempts.completed_at DESC, quiz_attempts.started_at DESC
       `
     )
-    .all(lessonId) as unknown as QuizAttemptRow[]
+    .all(normalizedLessonId) as unknown as QuizAttemptRow[]
 
   return rows.map(mapQuizAttemptRow)
 }
@@ -359,7 +401,7 @@ export function submitQuizAttemptFromDatabase(
   const attemptId = randomUUID()
 
   if (normalizedQuizId.length === 0) {
-    throw new Error('Quiz id is required to submit an attempt')
+    throw new AppError('validation_failed', 'Quiz id is required to submit an attempt.')
   }
 
   try {
@@ -368,7 +410,7 @@ export function submitQuizAttemptFromDatabase(
     const fullQuiz = loadFullQuizFromDatabase(connection, normalizedQuizId)
 
     if (fullQuiz === null) {
-      throw new Error(`Quiz was not found for attempt submission: ${normalizedQuizId}`)
+      throw new AppError('quiz_not_found', 'This quiz is no longer available.')
     }
 
     const gradedAnswers = validateAndGradeAnswers(fullQuiz, answers)
@@ -526,14 +568,14 @@ function loadQuizResultFromDatabase(connection: DatabaseSync, attemptId: string)
     .get(attemptId) as unknown as QuizAttemptRow | undefined
 
   if (attemptRow === undefined) {
-    throw new Error(`Quiz attempt was not found: ${attemptId}`)
+    throw new AppError('quiz_attempt_not_found', 'This quiz attempt is no longer available.')
   }
 
   const attempt = mapQuizAttemptRow(attemptRow)
   const fullQuiz = loadFullQuizFromDatabase(connection, attempt.quizId)
 
   if (fullQuiz === null) {
-    throw new Error(`Quiz was not found for attempt result: ${attempt.quizId}`)
+    throw new AppError('quiz_not_found', 'This quiz is no longer available.')
   }
 
   const questionsById = new Map(
@@ -562,7 +604,7 @@ function loadQuizResultFromDatabase(connection: DatabaseSync, attemptId: string)
       const question = questionsById.get(answerRow.question_id)
 
       if (question === undefined) {
-        throw new Error(`Question was not found for attempt answer: ${answerRow.question_id}`)
+        throw new AppError('quiz_not_found', 'This quiz is no longer available.')
       }
 
       return {
@@ -577,7 +619,7 @@ function loadQuizResultFromDatabase(connection: DatabaseSync, attemptId: string)
 
 function validateQuestionInputs(questions: SaveQuizQuestionInput[]): ValidatedQuestionInput[] {
   if (questions.length === 0) {
-    throw new Error('At least one quiz question is required')
+    throw new AppError('validation_failed', 'At least one quiz question is required.')
   }
 
   return questions.map((question, questionIndex) => {
@@ -585,11 +627,17 @@ function validateQuestionInputs(questions: SaveQuizQuestionInput[]): ValidatedQu
     const explanation = question.explanation?.trim() || null
 
     if (prompt.length === 0) {
-      throw new Error(`Quiz question ${questionIndex + 1} prompt is required`)
+      throw new AppError(
+        'validation_failed',
+        `Quiz question ${questionIndex + 1} prompt is required.`
+      )
     }
 
     if (question.choices.length < 2) {
-      throw new Error(`Quiz question ${questionIndex + 1} must have at least two choices`)
+      throw new AppError(
+        'validation_failed',
+        `Quiz question ${questionIndex + 1} must have at least two choices.`
+      )
     }
 
     let correctChoiceCount = 0
@@ -597,8 +645,9 @@ function validateQuestionInputs(questions: SaveQuizQuestionInput[]): ValidatedQu
       const choiceText = choice.choiceText.trim()
 
       if (choiceText.length === 0) {
-        throw new Error(
-          `Quiz question ${questionIndex + 1} choice ${choiceIndex + 1} text is required`
+        throw new AppError(
+          'validation_failed',
+          `Quiz question ${questionIndex + 1} choice ${choiceIndex + 1} text is required.`
         )
       }
 
@@ -613,7 +662,10 @@ function validateQuestionInputs(questions: SaveQuizQuestionInput[]): ValidatedQu
     })
 
     if (correctChoiceCount !== 1) {
-      throw new Error(`Quiz question ${questionIndex + 1} must have exactly one correct choice`)
+      throw new AppError(
+        'validation_failed',
+        `Quiz question ${questionIndex + 1} must have exactly one correct choice.`
+      )
     }
 
     return {
@@ -629,7 +681,7 @@ function validateAndGradeAnswers(
   answers: QuizAnswerSubmission[]
 ): Array<{ questionId: string; selectedChoiceId: string; isCorrect: boolean }> {
   if (fullQuiz.questions.length === 0) {
-    throw new Error(`Quiz has no questions to grade: ${fullQuiz.quiz.id}`)
+    throw new AppError('validation_failed', 'This quiz has no questions to grade.')
   }
 
   const questionById = new Map(fullQuiz.questions.map((question) => [question.id, question]))
@@ -640,19 +692,19 @@ function validateAndGradeAnswers(
     const selectedChoiceId = answer.selectedChoiceId.trim()
 
     if (questionId.length === 0) {
-      throw new Error('Submitted answer question id is required')
+      throw new AppError('validation_failed', 'Submitted answer question id is required.')
     }
 
     if (selectedChoiceId.length === 0) {
-      throw new Error(`Selected choice id is required for question: ${questionId}`)
+      throw new AppError('quiz_incomplete_submission', 'Answer every question before submitting.')
     }
 
     if (submittedAnswersByQuestionId.has(questionId)) {
-      throw new Error(`Duplicate submitted answer for question: ${questionId}`)
+      throw new AppError('validation_failed', 'Submitted answers include a duplicate question.')
     }
 
     if (!questionById.has(questionId)) {
-      throw new Error(`Submitted answer references an unknown quiz question: ${questionId}`)
+      throw new AppError('validation_failed', 'Submitted answers include an unknown question.')
     }
 
     submittedAnswersByQuestionId.set(questionId, {
@@ -662,20 +714,25 @@ function validateAndGradeAnswers(
   }
 
   if (submittedAnswersByQuestionId.size !== fullQuiz.questions.length) {
-    throw new Error('Submitted attempt must answer every quiz question')
+    const missingAnswerCount = fullQuiz.questions.length - submittedAnswersByQuestionId.size
+
+    throw new AppError(
+      'quiz_incomplete_submission',
+      `Answer every question before submitting. ${missingAnswerCount} remaining.`
+    )
   }
 
   return fullQuiz.questions.map((question) => {
     const answer = submittedAnswersByQuestionId.get(question.id)
 
     if (answer === undefined) {
-      throw new Error(`Submitted attempt is missing an answer for question: ${question.id}`)
+      throw new AppError('quiz_incomplete_submission', 'Answer every question before submitting.')
     }
 
     const selectedChoice = question.choices.find((choice) => choice.id === answer.selectedChoiceId)
 
     if (selectedChoice === undefined) {
-      throw new Error(`Selected choice does not belong to question: ${question.id}`)
+      throw new AppError('validation_failed', 'Selected answers do not match this quiz.')
     }
 
     return {
@@ -717,7 +774,7 @@ function normalizeQuizDifficulty(
     return value
   }
 
-  throw new Error(`Unsupported quiz difficulty: ${value}`)
+  throw new AppError('validation_failed', 'Choose a supported quiz difficulty.')
 }
 
 function mapQuizQuestionRow(row: QuizQuestionRow): Omit<QuizQuestion, 'choices'> {
