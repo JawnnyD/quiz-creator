@@ -1365,8 +1365,19 @@ function shuffleItems<T>(items: readonly T[]): T[] {
   return shuffledItems
 }
 
+const timestampTimeZoneSuffixPattern = /(?:Z|[+-]\d{2}:?\d{2})$/i
+
+function parseStoredTimestamp(value: string): Date {
+  const normalizedValue = value.trim().replace(' ', 'T')
+  const timestampValue = timestampTimeZoneSuffixPattern.test(normalizedValue)
+    ? normalizedValue
+    : `${normalizedValue}Z`
+
+  return new Date(timestampValue)
+}
+
 function formatDate(value: string): string {
-  const date = new Date(value.replace(' ', 'T'))
+  const date = parseStoredTimestamp(value)
 
   if (Number.isNaN(date.getTime())) {
     return value
