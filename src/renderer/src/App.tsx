@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type JSX,
-  type KeyboardEvent
-} from 'react'
+import { useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent } from 'react'
 import { isAppError, type AppErrorCode } from '../../shared/errors'
 import type { LessonRecord } from '../../shared/lessons'
 import type { QuizAttempt, QuizDifficulty, QuizRecord, QuizResult } from '../../shared/quizzes'
@@ -14,6 +7,7 @@ type FullQuiz = NonNullable<Awaited<ReturnType<Window['api']['getQuiz']>>>
 type QuizAnswerSubmission = Parameters<Window['api']['submitQuizAttempt']>[1][number]
 type TitleEditTargetKind = 'lesson' | 'quiz'
 type LessonSortField = 'createdAt' | 'title'
+type QuizSortField = 'createdAt' | 'title' | 'recentlyAttempted'
 type SortDirection = 'asc' | 'desc'
 
 interface TitleEditTarget {
@@ -24,10 +18,12 @@ interface TitleEditTarget {
 const defaultQuestionCountInput = '10'
 const defaultLessonSortField: LessonSortField = 'createdAt'
 const defaultLessonSortDirection: SortDirection = 'desc'
+const defaultQuizSortField: QuizSortField = 'createdAt'
+const defaultQuizSortDirection: SortDirection = 'desc'
 const minQuestionCount = 0
 const maxQuestionCount = 50
 const questionCountSliderStep = 5
-const lessonTitleCollator = new Intl.Collator(undefined, {
+const titleCollator = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: 'base'
 })
@@ -36,6 +32,14 @@ const lessonSortOptions = [
   { id: 'title', label: 'Title' }
 ] as const satisfies ReadonlyArray<{
   id: LessonSortField
+  label: string
+}>
+const quizSortOptions = [
+  { id: 'createdAt', label: 'Created at' },
+  { id: 'title', label: 'Title' },
+  { id: 'recentlyAttempted', label: 'Recently attempted' }
+] as const satisfies ReadonlyArray<{
+  id: QuizSortField
   label: string
 }>
 
@@ -56,6 +60,10 @@ function App(): JSX.Element {
     defaultLessonSortDirection
   )
   const [isLessonSortMenuOpen, setIsLessonSortMenuOpen] = useState(false)
+  const [quizSortField, setQuizSortField] = useState<QuizSortField>(defaultQuizSortField)
+  const [quizSortDirection, setQuizSortDirection] =
+    useState<SortDirection>(defaultQuizSortDirection)
+  const [isQuizSortMenuOpen, setIsQuizSortMenuOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isImporting, setIsImporting] = useState(false)
   const [deletingLessonIds, setDeletingLessonIds] = useState<Set<string>>(() => new Set())
@@ -89,6 +97,7 @@ function App(): JSX.Element {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const quizLoadRequestIdRef = useRef(0)
   const lessonSortDropdownRef = useRef<HTMLDivElement | null>(null)
+  const quizSortDropdownRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let isCanceled = false
@@ -119,36 +128,49 @@ function App(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (!isLessonSortMenuOpen) {
+    if (!isLessonSortMenuOpen && !isQuizSortMenuOpen) {
       return
     }
 
-    const closeLessonSortMenuOnOutsideClick = (event: PointerEvent): void => {
+    const closeSortMenusOnOutsideClick = (event: PointerEvent): void => {
       const target = event.target
 
+      if (!(target instanceof Node)) {
+        return
+      }
+
       if (
-        target instanceof Node &&
+        isLessonSortMenuOpen &&
         lessonSortDropdownRef.current !== null &&
         !lessonSortDropdownRef.current.contains(target)
       ) {
         setIsLessonSortMenuOpen(false)
       }
-    }
 
-    const closeLessonSortMenuOnEscape = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        setIsLessonSortMenuOpen(false)
+      if (
+        isQuizSortMenuOpen &&
+        quizSortDropdownRef.current !== null &&
+        !quizSortDropdownRef.current.contains(target)
+      ) {
+        setIsQuizSortMenuOpen(false)
       }
     }
 
-    document.addEventListener('pointerdown', closeLessonSortMenuOnOutsideClick)
-    document.addEventListener('keydown', closeLessonSortMenuOnEscape)
+    const closeSortMenusOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setIsLessonSortMenuOpen(false)
+        setIsQuizSortMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', closeSortMenusOnOutsideClick)
+    document.addEventListener('keydown', closeSortMenusOnEscape)
 
     return () => {
-      document.removeEventListener('pointerdown', closeLessonSortMenuOnOutsideClick)
-      document.removeEventListener('keydown', closeLessonSortMenuOnEscape)
+      document.removeEventListener('pointerdown', closeSortMenusOnOutsideClick)
+      document.removeEventListener('keydown', closeSortMenusOnEscape)
     }
-  }, [isLessonSortMenuOpen])
+  }, [isLessonSortMenuOpen, isQuizSortMenuOpen])
 
   const activeLesson = useMemo(() => {
     if (activeLessonId === null) {
@@ -342,6 +364,10 @@ function App(): JSX.Element {
 
     return groupedAttempts
   }, [quizAttempts])
+  const sortedQuizzes = useMemo(
+    () => sortQuizzes(quizzes, attemptsByQuizId, quizSortField, quizSortDirection),
+    [quizzes, attemptsByQuizId, quizSortField, quizSortDirection]
+  )
   const activeAttemptHistoryAttempts =
     activeAttemptHistoryQuiz === null
       ? []
@@ -487,6 +513,7 @@ function App(): JSX.Element {
 
   const toggleLessonSortMenu = (): void => {
     setIsLessonSortMenuOpen((isOpen) => !isOpen)
+    setIsQuizSortMenuOpen(false)
   }
 
   const selectLessonSortField = (nextSortField: LessonSortField): void => {
@@ -498,8 +525,28 @@ function App(): JSX.Element {
     setIsLessonSortMenuOpen(false)
   }
 
+  const toggleQuizSortMenu = (): void => {
+    setIsQuizSortMenuOpen((isOpen) => !isOpen)
+    setIsLessonSortMenuOpen(false)
+  }
+
+  const selectQuizSortField = (nextSortField: QuizSortField): void => {
+    if (nextSortField !== quizSortField) {
+      setQuizSortField(nextSortField)
+      setQuizSortDirection(getDefaultQuizSortDirection(nextSortField))
+    }
+
+    setIsQuizSortMenuOpen(false)
+  }
+
   const toggleLessonSortDirection = (): void => {
     setLessonSortDirection((currentSortDirection) =>
+      currentSortDirection === 'asc' ? 'desc' : 'asc'
+    )
+  }
+
+  const toggleQuizSortDirection = (): void => {
+    setQuizSortDirection((currentSortDirection) =>
       currentSortDirection === 'asc' ? 'desc' : 'asc'
     )
   }
@@ -971,11 +1018,13 @@ function App(): JSX.Element {
             </div>
             <div className="lesson-header-actions">
               {lessons.length > 1 ? (
-                <div className="lesson-sort-controls" aria-label="Lesson sorting">
-                  <div className="lesson-sort-control" ref={lessonSortDropdownRef}>
-                    <span id="lesson-sort-label">Sort by</span>
+                <div className="sort-controls" aria-label="Lesson sorting">
+                  <div className="sort-control" ref={lessonSortDropdownRef}>
+                    <span className="sort-label" id="lesson-sort-label">
+                      Sort by
+                    </span>
                     <button
-                      className="lesson-sort-menu-button"
+                      className="sort-menu-button"
                       type="button"
                       onClick={toggleLessonSortMenu}
                       aria-haspopup="listbox"
@@ -985,23 +1034,19 @@ function App(): JSX.Element {
                       <span id="lesson-sort-selected-value">
                         {getLessonSortFieldLabel(lessonSortField)}
                       </span>
-                      <span className="lesson-sort-menu-chevron" aria-hidden="true">
+                      <span className="sort-menu-chevron" aria-hidden="true">
                         {isLessonSortMenuOpen ? '\u25B4' : '\u25BE'}
                       </span>
                     </button>
                     {isLessonSortMenuOpen ? (
-                      <div
-                        className="lesson-sort-menu"
-                        role="listbox"
-                        aria-labelledby="lesson-sort-label"
-                      >
+                      <div className="sort-menu" role="listbox" aria-labelledby="lesson-sort-label">
                         {lessonSortOptions.map((option) => {
                           const isSelectedOption = lessonSortField === option.id
 
                           return (
                             <button
-                              className={`lesson-sort-option${
-                                isSelectedOption ? ' lesson-sort-option-selected' : ''
+                              className={`sort-option${
+                                isSelectedOption ? ' sort-option-selected' : ''
                               }`}
                               type="button"
                               role="option"
@@ -1019,7 +1064,7 @@ function App(): JSX.Element {
                     ) : null}
                   </div>
                   <button
-                    className="lesson-sort-direction-button"
+                    className="sort-direction-button"
                     type="button"
                     onClick={toggleLessonSortDirection}
                     aria-label={getLessonSortDirectionToggleLabel(
@@ -1528,6 +1573,63 @@ function App(): JSX.Element {
                   <h3 id="quizzes-heading">Quizzes</h3>
                   <p>{quizSummary}</p>
                 </div>
+                {quizzes.length > 1 ? (
+                  <div className="sort-controls" aria-label="Quiz sorting">
+                    <div className="sort-control" ref={quizSortDropdownRef}>
+                      <span className="sort-label" id="quiz-sort-label">
+                        Sort by
+                      </span>
+                      <button
+                        className="sort-menu-button"
+                        type="button"
+                        onClick={toggleQuizSortMenu}
+                        aria-haspopup="listbox"
+                        aria-expanded={isQuizSortMenuOpen}
+                        aria-labelledby="quiz-sort-label quiz-sort-selected-value"
+                      >
+                        <span id="quiz-sort-selected-value">
+                          {getQuizSortFieldLabel(quizSortField)}
+                        </span>
+                        <span className="sort-menu-chevron" aria-hidden="true">
+                          {isQuizSortMenuOpen ? '\u25B4' : '\u25BE'}
+                        </span>
+                      </button>
+                      {isQuizSortMenuOpen ? (
+                        <div className="sort-menu" role="listbox" aria-labelledby="quiz-sort-label">
+                          {quizSortOptions.map((option) => {
+                            const isSelectedOption = quizSortField === option.id
+
+                            return (
+                              <button
+                                className={`sort-option${
+                                  isSelectedOption ? ' sort-option-selected' : ''
+                                }`}
+                                type="button"
+                                role="option"
+                                aria-selected={isSelectedOption}
+                                key={option.id}
+                                onClick={() => {
+                                  selectQuizSortField(option.id)
+                                }}
+                              >
+                                {option.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      className="sort-direction-button"
+                      type="button"
+                      onClick={toggleQuizSortDirection}
+                      aria-label={getQuizSortDirectionToggleLabel(quizSortField, quizSortDirection)}
+                      title={getQuizSortDirectionCurrentLabel(quizSortField, quizSortDirection)}
+                    >
+                      {quizSortDirection === 'asc' ? '\u2191' : '\u2193'}
+                    </button>
+                  </div>
+                ) : null}
               </header>
 
               {quizErrorMessage !== null ? (
@@ -1542,7 +1644,7 @@ function App(): JSX.Element {
                 <p className="empty-state detail-empty-state">No quizzes for this lesson yet.</p>
               ) : (
                 <ul className="quiz-list" aria-label="Saved quizzes">
-                  {quizzes.map((quiz) => {
+                  {sortedQuizzes.map((quiz) => {
                     const quizAttemptsForQuiz = attemptsByQuizId.get(quiz.id) ?? []
                     const isEditingQuizTitle = isEditingTitle('quiz', quiz.id)
 
@@ -1701,7 +1803,7 @@ function compareLessonTitleAscending(
   firstLesson: LessonRecord,
   secondLesson: LessonRecord
 ): number {
-  return lessonTitleCollator.compare(firstLesson.title, secondLesson.title)
+  return titleCollator.compare(firstLesson.title, secondLesson.title)
 }
 
 function compareLessonId(firstLesson: LessonRecord, secondLesson: LessonRecord): number {
@@ -1736,6 +1838,164 @@ function getLessonSortDirectionToggleLabel(
   }
 
   return sortDirection === 'asc' ? 'Sort Z to A' : 'Sort A to Z'
+}
+
+function sortQuizzes(
+  quizzes: QuizRecord[],
+  attemptsByQuizId: Map<string, QuizAttempt[]>,
+  sortField: QuizSortField,
+  sortDirection: SortDirection
+): QuizRecord[] {
+  return [...quizzes].sort((firstQuiz, secondQuiz) => {
+    if (sortField === 'createdAt') {
+      const dateComparison = compareQuizCreatedAtAscending(firstQuiz, secondQuiz)
+      const directedDateComparison = sortDirection === 'asc' ? dateComparison : -dateComparison
+
+      if (directedDateComparison !== 0) {
+        return directedDateComparison
+      }
+
+      return (
+        compareQuizTitleAscending(firstQuiz, secondQuiz) || compareQuizId(firstQuiz, secondQuiz)
+      )
+    }
+
+    if (sortField === 'recentlyAttempted') {
+      return compareQuizzesByRecentAttempt(firstQuiz, secondQuiz, attemptsByQuizId, sortDirection)
+    }
+
+    const titleComparison = compareQuizTitleAscending(firstQuiz, secondQuiz)
+    const directedTitleComparison = sortDirection === 'asc' ? titleComparison : -titleComparison
+
+    if (directedTitleComparison !== 0) {
+      return directedTitleComparison
+    }
+
+    return (
+      -compareQuizCreatedAtAscending(firstQuiz, secondQuiz) || compareQuizId(firstQuiz, secondQuiz)
+    )
+  })
+}
+
+function compareQuizzesByRecentAttempt(
+  firstQuiz: QuizRecord,
+  secondQuiz: QuizRecord,
+  attemptsByQuizId: Map<string, QuizAttempt[]>,
+  sortDirection: SortDirection
+): number {
+  const firstAttemptTime = getLatestCompletedAttemptTime(firstQuiz.id, attemptsByQuizId)
+  const secondAttemptTime = getLatestCompletedAttemptTime(secondQuiz.id, attemptsByQuizId)
+
+  if (firstAttemptTime === null && secondAttemptTime === null) {
+    return (
+      -compareQuizCreatedAtAscending(firstQuiz, secondQuiz) || compareQuizId(firstQuiz, secondQuiz)
+    )
+  }
+
+  if (firstAttemptTime === null) {
+    return 1
+  }
+
+  if (secondAttemptTime === null) {
+    return -1
+  }
+
+  const attemptComparison = firstAttemptTime - secondAttemptTime
+  const directedAttemptComparison = sortDirection === 'asc' ? attemptComparison : -attemptComparison
+
+  if (directedAttemptComparison !== 0) {
+    return directedAttemptComparison
+  }
+
+  return (
+    -compareQuizCreatedAtAscending(firstQuiz, secondQuiz) || compareQuizId(firstQuiz, secondQuiz)
+  )
+}
+
+function getLatestCompletedAttemptTime(
+  quizId: string,
+  attemptsByQuizId: Map<string, QuizAttempt[]>
+): number | null {
+  let latestAttemptTime: number | null = null
+
+  for (const attempt of attemptsByQuizId.get(quizId) ?? []) {
+    if (attempt.completedAt === null) {
+      continue
+    }
+
+    const attemptTime = parseStoredTimestamp(attempt.completedAt).getTime()
+
+    if (!Number.isFinite(attemptTime)) {
+      continue
+    }
+
+    if (latestAttemptTime === null || attemptTime > latestAttemptTime) {
+      latestAttemptTime = attemptTime
+    }
+  }
+
+  return latestAttemptTime
+}
+
+function compareQuizCreatedAtAscending(firstQuiz: QuizRecord, secondQuiz: QuizRecord): number {
+  const firstTime = parseStoredTimestamp(firstQuiz.createdAt).getTime()
+  const secondTime = parseStoredTimestamp(secondQuiz.createdAt).getTime()
+
+  if (Number.isFinite(firstTime) && Number.isFinite(secondTime) && firstTime !== secondTime) {
+    return firstTime - secondTime
+  }
+
+  return firstQuiz.createdAt.localeCompare(secondQuiz.createdAt)
+}
+
+function compareQuizTitleAscending(firstQuiz: QuizRecord, secondQuiz: QuizRecord): number {
+  return titleCollator.compare(firstQuiz.title, secondQuiz.title)
+}
+
+function compareQuizId(firstQuiz: QuizRecord, secondQuiz: QuizRecord): number {
+  return firstQuiz.id.localeCompare(secondQuiz.id)
+}
+
+function getDefaultQuizSortDirection(sortField: QuizSortField): SortDirection {
+  return sortField === 'title' ? 'asc' : 'desc'
+}
+
+function getQuizSortFieldLabel(sortField: QuizSortField): string {
+  return quizSortOptions.find((option) => option.id === sortField)?.label ?? 'Created at'
+}
+
+function getQuizSortDirectionCurrentLabel(
+  sortField: QuizSortField,
+  sortDirection: SortDirection
+): string {
+  if (sortField === 'title') {
+    return sortDirection === 'asc' ? 'A to Z' : 'Z to A'
+  }
+
+  if (sortField === 'recentlyAttempted') {
+    return sortDirection === 'asc'
+      ? 'Least recently attempted first'
+      : 'Most recently attempted first'
+  }
+
+  return sortDirection === 'asc' ? 'Oldest first' : 'Newest first'
+}
+
+function getQuizSortDirectionToggleLabel(
+  sortField: QuizSortField,
+  sortDirection: SortDirection
+): string {
+  if (sortField === 'title') {
+    return sortDirection === 'asc' ? 'Sort Z to A' : 'Sort A to Z'
+  }
+
+  if (sortField === 'recentlyAttempted') {
+    return sortDirection === 'asc'
+      ? 'Sort most recently attempted first'
+      : 'Sort least recently attempted first'
+  }
+
+  return sortDirection === 'asc' ? 'Sort newest first' : 'Sort oldest first'
 }
 
 function upsertQuiz(quizzes: QuizRecord[], quiz: QuizRecord): QuizRecord[] {

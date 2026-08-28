@@ -101,21 +101,103 @@ describe('App lesson sorting', () => {
     await screen.findByRole('list', { name: 'Imported lessons' })
     expect(getRenderedLessonTitles()).toEqual(['Alpha 2', 'Zebra 2', 'alpha 10'])
 
-    fireEvent.change(screen.getByLabelText('Sort lessons by'), { target: { value: 'title' } })
-    expect(getSortDirectionButton().textContent).toBe('↑')
+    selectSortOption('Import date', 'Title')
     expect(getRenderedLessonTitles()).toEqual(['Alpha 2', 'alpha 10', 'Zebra 2'])
 
-    fireEvent.click(getSortDirectionButton())
-    expect(getSortDirectionButton().textContent).toBe('↓')
+    fireEvent.click(getSortDirectionButton('Sort Z to A'))
     expect(getRenderedLessonTitles()).toEqual(['Zebra 2', 'alpha 10', 'Alpha 2'])
 
-    fireEvent.change(screen.getByLabelText('Sort lessons by'), { target: { value: 'createdAt' } })
-    expect(getSortDirectionButton().textContent).toBe('↓')
+    selectSortOption('Title', 'Import date')
     expect(getRenderedLessonTitles()).toEqual(['Alpha 2', 'Zebra 2', 'alpha 10'])
 
-    fireEvent.click(getSortDirectionButton())
-    expect(getSortDirectionButton().textContent).toBe('↑')
+    fireEvent.click(getSortDirectionButton('Sort oldest first'))
     expect(getRenderedLessonTitles()).toEqual(['alpha 10', 'Zebra 2', 'Alpha 2'])
+  })
+})
+
+describe('App quiz sorting', () => {
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it('sorts quizzes by creation date, title, and recent attempts', async () => {
+    const lesson = createLesson()
+    const quizzes = [
+      createQuiz({
+        id: 'quiz-old',
+        title: 'alpha 10',
+        createdAt: '2026-01-01 12:00:00'
+      }),
+      createQuiz({
+        id: 'quiz-new',
+        title: 'Alpha 2',
+        createdAt: '2026-01-03 12:00:00'
+      }),
+      createQuiz({
+        id: 'quiz-middle',
+        title: 'Zebra 2',
+        createdAt: '2026-01-02 12:00:00'
+      }),
+      createQuiz({
+        id: 'quiz-never',
+        title: 'Beta 1',
+        createdAt: '2026-01-04 12:00:00'
+      })
+    ]
+
+    setWindowApi(
+      createApi({
+        listLessons: vi.fn(async () => [lesson]),
+        listQuizzesForLesson: vi.fn(async () => quizzes),
+        listQuizAttemptsForLesson: vi.fn(async () => [
+          createAttempt({
+            id: 'attempt-old',
+            quizId: 'quiz-old',
+            completedAt: '2026-01-04 12:00:00'
+          }),
+          createAttempt({
+            id: 'attempt-new-earlier',
+            quizId: 'quiz-new',
+            completedAt: '2026-01-05 12:00:00'
+          }),
+          createAttempt({
+            id: 'attempt-middle',
+            quizId: 'quiz-middle',
+            completedAt: '2026-01-07 12:00:00'
+          }),
+          createAttempt({
+            id: 'attempt-new-latest',
+            quizId: 'quiz-new',
+            completedAt: '2026-01-08 12:00:00'
+          })
+        ])
+      })
+    )
+
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('Cardiology'))
+    await screen.findByRole('list', { name: 'Saved quizzes' })
+    expect(getRenderedQuizTitles()).toEqual(['Beta 1', 'Alpha 2', 'Zebra 2', 'alpha 10'])
+
+    selectSortOption('Created at', 'Title')
+    expect(getRenderedQuizTitles()).toEqual(['Alpha 2', 'alpha 10', 'Beta 1', 'Zebra 2'])
+
+    fireEvent.click(getSortDirectionButton('Sort Z to A'))
+    expect(getRenderedQuizTitles()).toEqual(['Zebra 2', 'Beta 1', 'alpha 10', 'Alpha 2'])
+
+    selectSortOption('Title', 'Created at')
+    expect(getRenderedQuizTitles()).toEqual(['Beta 1', 'Alpha 2', 'Zebra 2', 'alpha 10'])
+
+    fireEvent.click(getSortDirectionButton('Sort oldest first'))
+    expect(getRenderedQuizTitles()).toEqual(['alpha 10', 'Zebra 2', 'Alpha 2', 'Beta 1'])
+
+    selectSortOption('Created at', 'Recently attempted')
+    expect(getRenderedQuizTitles()).toEqual(['Alpha 2', 'Zebra 2', 'alpha 10', 'Beta 1'])
+
+    fireEvent.click(getSortDirectionButton('Sort least recently attempted first'))
+    expect(getRenderedQuizTitles()).toEqual(['alpha 10', 'Zebra 2', 'Alpha 2', 'Beta 1'])
   })
 })
 
@@ -144,12 +226,23 @@ function setWindowApi(api: AppAPI): void {
   })
 }
 
-function getSortDirectionButton(): HTMLButtonElement {
-  return screen.getByRole('button', { name: /sort (oldest first|newest first|z to a|a to z)/i })
+function selectSortOption(currentSortLabel: string, optionLabel: string): void {
+  fireEvent.click(screen.getByRole('button', { name: `Sort by ${currentSortLabel}` }))
+  fireEvent.click(screen.getByRole('option', { name: optionLabel }))
+}
+
+function getSortDirectionButton(name: string): HTMLButtonElement {
+  return screen.getByRole('button', { name })
 }
 
 function getRenderedLessonTitles(): string[] {
   return Array.from(document.querySelectorAll('.lesson-title-text')).map(
+    (element) => element.textContent ?? ''
+  )
+}
+
+function getRenderedQuizTitles(): string[] {
+  return Array.from(document.querySelectorAll('.quiz-title')).map(
     (element) => element.textContent ?? ''
   )
 }
@@ -172,7 +265,7 @@ function createLesson(overrides: Partial<LessonRecord> = {}): LessonRecord {
   }
 }
 
-function createQuiz(): QuizRecord {
+function createQuiz(overrides: Partial<QuizRecord> = {}): QuizRecord {
   return {
     id: 'quiz-1',
     lessonId: 'lesson-1',
@@ -180,7 +273,20 @@ function createQuiz(): QuizRecord {
     difficulty: 'easy',
     questionCount: 1,
     createdAt: timestamp,
-    updatedAt: timestamp
+    updatedAt: timestamp,
+    ...overrides
+  }
+}
+
+function createAttempt(overrides: Partial<QuizAttempt> = {}): QuizAttempt {
+  return {
+    id: 'attempt-1',
+    quizId: 'quiz-1',
+    startedAt: timestamp,
+    completedAt: timestamp,
+    correctAnswerCount: 1,
+    totalQuestionCount: 1,
+    ...overrides
   }
 }
 

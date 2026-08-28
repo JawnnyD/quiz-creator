@@ -62,20 +62,20 @@ body {
   gap: 12px;
 }
 
-.lesson-sort-controls {
+.sort-controls {
   display: flex;
   align-items: flex-end;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.lesson-sort-control {
+.sort-control {
   display: grid;
   gap: 6px;
   position: relative;
 }
 
-.lesson-sort-control span {
+.sort-label {
   color: var(--color-muted);
   font-size: 11px;
   font-weight: 700;
@@ -83,7 +83,7 @@ body {
   text-transform: uppercase;
 }
 
-.lesson-sort-menu-button {
+.sort-menu-button {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -103,23 +103,23 @@ body {
   cursor: pointer;
 }
 
-.lesson-sort-menu-button:hover,
-.lesson-sort-menu-button[aria-expanded='true'] {
+.sort-menu-button:hover,
+.sort-menu-button[aria-expanded='true'] {
   background: var(--color-surface-raised);
 }
 
-.lesson-sort-menu-button:focus-visible {
+.sort-menu-button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 
-.lesson-sort-menu-chevron {
+.sort-menu-chevron {
   color: var(--color-muted);
   font-size: 12px;
   line-height: 1;
 }
 
-.lesson-sort-menu {
+.sort-menu {
   position: absolute;
   top: calc(100% + 7px);
   left: 0;
@@ -134,7 +134,7 @@ body {
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
 }
 
-.lesson-sort-option {
+.sort-option {
   width: 100%;
   border: 0;
   border-radius: 8px;
@@ -149,17 +149,17 @@ body {
   cursor: pointer;
 }
 
-.lesson-sort-option:hover,
-.lesson-sort-option:focus {
+.sort-option:hover,
+.sort-option:focus {
   outline: none;
   background: var(--color-surface-raised);
 }
 
-.lesson-sort-option-selected {
+.sort-option-selected {
   background: rgba(255, 255, 245, 0.055);
 }
 
-.lesson-sort-direction-button {
+.sort-direction-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -176,16 +176,16 @@ body {
   cursor: pointer;
 }
 
-.lesson-sort-direction-button:hover {
+.sort-direction-button:hover {
   background: var(--color-surface-raised);
 }
 
-.lesson-sort-direction-button:focus,
-.lesson-sort-direction-button:focus-visible {
+.sort-direction-button:focus,
+.sort-direction-button:focus-visible {
   outline: none;
 }
 
-.lesson-sort-direction-button:active {
+.sort-direction-button:active {
   transform: translateY(1px);
 }
 
@@ -1177,16 +1177,16 @@ body {
   }
 
   .lesson-header-actions,
-  .lesson-sort-controls {
+  .sort-controls {
     justify-content: stretch;
     width: 100%;
   }
 
-  .lesson-sort-control {
+  .sort-control {
     flex: 1 1 150px;
   }
 
-  .lesson-sort-control select {
+  .sort-menu-button {
     width: 100%;
   }
 
