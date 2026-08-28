@@ -11,6 +11,8 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+  - node_modules/@napi-rs/canvas/**
+  - node_modules/@napi-rs/canvas-darwin-*/**
 win:
   executableName: quiz-creator
 nsis:

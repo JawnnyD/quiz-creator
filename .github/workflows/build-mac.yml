@@ -5,12 +5,16 @@ on:
 
 jobs:
   build-mac:
-    runs-on: macos-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        arch:
-          - arm64
-          - x64
+        include:
+          - arch: arm64
+            runner: macos-latest
+            canvasPackage: '@napi-rs/canvas-darwin-arm64'
+          - arch: x64
+            runner: macos-15-intel
+            canvasPackage: '@napi-rs/canvas-darwin-x64'
 
     steps:
       - uses: actions/checkout@v4
@@ -21,11 +25,21 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci --include=optional
 
-      - run: npm run build
+      - name: Verify PDF.js native canvas support
+        env:
+          CANVAS_PACKAGE: ${{ matrix.canvasPackage }}
+        run: |
+          node -e "const canvas = require('@napi-rs/canvas'); if (!canvas.DOMMatrix || !canvas.Path2D) throw new Error('Missing PDF.js canvas polyfills'); console.log({ DOMMatrix: !!canvas.DOMMatrix, Path2D: !!canvas.Path2D })"
+          node -e "console.log(require.resolve(process.env.CANVAS_PACKAGE))"
 
-      - run: npx electron-builder --mac --${{ matrix.arch }} --publish never
+      - name: Build app source
+        run: npm run build
+
+      - name: Package macOS app
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish never
 
       - uses: actions/upload-artifact@v4
         with:

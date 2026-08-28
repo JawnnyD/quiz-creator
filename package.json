@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
+    "@napi-rs/canvas": "^1.0.7",
     "dotenv": "^17.4.2",
     "openai": "^7.6.0",
     "pdfjs-dist": "^6.2.108"
