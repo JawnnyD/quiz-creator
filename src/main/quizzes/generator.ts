@@ -9,6 +9,7 @@ import {
   getLessonTextForQuizGenerationFromDatabase,
   type LessonTextForQuizGeneration
 } from '../lessons/service'
+import { resolveOpenAiApiKeyFromDatabase, type SecureStorageAdapter } from '../settings/service'
 import {
   createQuizRecordFromDatabase,
   loadFullQuizFromDatabase,
@@ -22,9 +23,9 @@ const maxTemporaryQuizQuestionCount = 50
 const requiredChoicesPerQuestion = 5
 const easyModel = 'gpt-5.6-luna'
 const advancedModel = 'gpt-5.6-terra'
-const openAiApiKeyEnvironmentVariableName = 'OPENAI_API_KEY'
 const aiResponseMalformedMessage =
   'The AI returned a quiz format this app could not use. Try generating again.'
+const missingOpenAiApiKeyMessage = 'Add an OpenAI API key in Settings before generating a quiz.'
 
 const defaultQuizSettings = {
   questionCount: 10,
@@ -33,7 +34,7 @@ const defaultQuizSettings = {
   customDifficultyInstructions: ''
 } satisfies NormalizedQuizSettings
 
-let openAiClient: OpenAI | null = null
+let cachedOpenAiClient: { apiKey: string; client: OpenAI } | null = null
 
 export interface GenerateTemporaryQuizInput {
   lessonId: string
@@ -55,7 +56,8 @@ interface GeneratedQuiz {
 
 export async function generateTemporaryQuizFromLessonTextFromDatabase(
   connection: DatabaseSync,
-  input: GenerateTemporaryQuizInput
+  input: GenerateTemporaryQuizInput,
+  secureStorage?: SecureStorageAdapter
 ): Promise<FullQuiz> {
   const lessonId = input.lessonId.trim()
 
@@ -101,7 +103,12 @@ export async function generateTemporaryQuizFromLessonTextFromDatabase(
     )
   }
 
-  const generatedQuiz = await generateQuizWithOpenAi(lessonText, settings)
+  const generatedQuiz = await generateQuizWithOpenAi(
+    connection,
+    lessonText,
+    settings,
+    secureStorage
+  )
   const title = input.title?.trim() || generatedQuiz.title || defaultQuizTitle
   const quiz = createQuizRecordFromDatabase(connection, {
     lessonId,
@@ -167,10 +174,12 @@ function normalizeQuizSettings(
 }
 
 async function generateQuizWithOpenAi(
+  connection: DatabaseSync,
   lessonText: LessonTextForQuizGeneration,
-  settings: NormalizedQuizSettings
+  settings: NormalizedQuizSettings,
+  secureStorage: SecureStorageAdapter | undefined
 ): Promise<GeneratedQuiz> {
-  const client = getOpenAiClient()
+  const client = getOpenAiClient(connection, secureStorage)
 
   try {
     const response = await client.responses.create({
@@ -214,19 +223,24 @@ async function generateQuizWithOpenAi(
   }
 }
 
-function getOpenAiClient(): OpenAI {
-  const apiKey = process.env[openAiApiKeyEnvironmentVariableName]?.trim()
+function getOpenAiClient(
+  connection: DatabaseSync,
+  secureStorage: SecureStorageAdapter | undefined
+): OpenAI {
+  const resolvedApiKey = resolveOpenAiApiKeyFromDatabase(connection, secureStorage)
 
-  if (apiKey === undefined || apiKey.length === 0) {
-    throw new AppError(
-      'ai_generation_failed',
-      `${openAiApiKeyEnvironmentVariableName} is required to generate quizzes.`
-    )
+  if (resolvedApiKey === null) {
+    throw new AppError('ai_generation_failed', missingOpenAiApiKeyMessage)
   }
 
-  openAiClient ??= new OpenAI({ apiKey })
+  if (cachedOpenAiClient === null || cachedOpenAiClient.apiKey !== resolvedApiKey.apiKey) {
+    cachedOpenAiClient = {
+      apiKey: resolvedApiKey.apiKey,
+      client: new OpenAI({ apiKey: resolvedApiKey.apiKey })
+    }
+  }
 
-  return openAiClient
+  return cachedOpenAiClient.client
 }
 
 function getModelForDifficulty(difficulty: QuizDifficulty): string {

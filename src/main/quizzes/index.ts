@@ -7,6 +7,7 @@ import type {
 } from '../../shared/quizzes'
 
 import { initializeDatabase } from '../db'
+import { openAiApiKeySecureStorage } from '../settings'
 import {
   generateTemporaryQuizFromLessonTextFromDatabase,
   type GenerateTemporaryQuizInput
@@ -102,5 +103,9 @@ export function submitQuizAttempt(quizId: string, answers: QuizAnswerSubmission[
 export async function generateTemporaryQuizFromLessonText(
   input: GenerateTemporaryQuizInput
 ): Promise<FullQuiz> {
-  return generateTemporaryQuizFromLessonTextFromDatabase(initializeDatabase(), input)
+  return generateTemporaryQuizFromLessonTextFromDatabase(
+    initializeDatabase(),
+    input,
+    openAiApiKeySecureStorage
+  )
 }

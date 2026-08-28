@@ -3,12 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { QuizDifficulty } from '../../shared/quizzes'
 import { createDatabaseConnection } from '../db/connection'
+import {
+  openAiApiKeyEnvironmentVariableName,
+  saveOpenAiApiKeyToDatabase,
+  type SecureStorageAdapter
+} from '../settings/service'
 import { loadFullQuizFromDatabase } from './service'
 import { generateTemporaryQuizFromLessonTextFromDatabase } from './generator'
 
 const openAiCreateMock = vi.hoisted(() => vi.fn())
+const openAiConstructorMock = vi.hoisted(() => vi.fn())
 const aiResponseMalformedMessage =
   'The AI returned a quiz format this app could not use. Try generating again.'
+const missingOpenAiApiKeyMessage = 'Add an OpenAI API key in Settings before generating a quiz.'
 const difficultyGenerationCases: Array<{
   difficulty: QuizDifficulty
   expectedModel: string
@@ -34,7 +41,9 @@ const difficultyGenerationCases: Array<{
 ]
 
 vi.mock('openai', () => ({
-  default: vi.fn().mockImplementation(function OpenAI() {
+  default: vi.fn().mockImplementation(function OpenAI(options: { apiKey?: string }) {
+    openAiConstructorMock(options)
+
     return {
       responses: {
         create: openAiCreateMock
@@ -47,14 +56,15 @@ let connection: DatabaseSync
 
 describe('quiz generation error states', () => {
   beforeEach(() => {
-    process.env['OPENAI_API_KEY'] = 'test-key'
+    process.env[openAiApiKeyEnvironmentVariableName] = 'test-key'
     openAiCreateMock.mockReset()
+    openAiConstructorMock.mockReset()
     connection = createDatabaseConnection(':memory:')
   })
 
   afterEach(() => {
     connection.close()
-    delete process.env['OPENAI_API_KEY']
+    delete process.env[openAiApiKeyEnvironmentVariableName]
   })
 
   it('rejects generation for a missing lesson', async () => {
@@ -129,6 +139,83 @@ describe('quiz generation error states', () => {
       }
     )
     expect(countRows('quizzes')).toBe(0)
+  })
+
+  it('uses the saved API key when one is available', async () => {
+    const secureStorage = createFakeSecureStorage()
+    insertLessonWithCompletedText('lesson-1')
+    process.env[openAiApiKeyEnvironmentVariableName] = 'sk-test-env-key-9999'
+    saveOpenAiApiKeyToDatabase(connection, secureStorage, 'sk-test-saved-key-1234')
+    openAiCreateMock.mockResolvedValue({
+      status: 'completed',
+      output_text: JSON.stringify(createGeneratedQuiz(1))
+    })
+
+    await generateTemporaryQuizFromLessonTextFromDatabase(
+      connection,
+      {
+        lessonId: 'lesson-1',
+        settings: { questionCount: 1 }
+      },
+      secureStorage
+    )
+
+    expect(openAiConstructorMock).toHaveBeenCalledWith({ apiKey: 'sk-test-saved-key-1234' })
+    expect(openAiCreateMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects generation with a friendly error when no API key is configured', async () => {
+    delete process.env[openAiApiKeyEnvironmentVariableName]
+    insertLessonWithCompletedText('lesson-1')
+
+    await expectAppError(
+      generateTemporaryQuizFromLessonTextFromDatabase(connection, {
+        lessonId: 'lesson-1',
+        settings: { questionCount: 1 }
+      }),
+      {
+        code: 'ai_generation_failed',
+        message: missingOpenAiApiKeyMessage
+      }
+    )
+    expect(openAiConstructorMock).not.toHaveBeenCalled()
+    expect(openAiCreateMock).not.toHaveBeenCalled()
+    expect(countRows('quizzes')).toBe(0)
+  })
+
+  it('recreates the OpenAI client when the saved API key changes', async () => {
+    const secureStorage = createFakeSecureStorage()
+    insertLessonWithCompletedText('lesson-1')
+    openAiCreateMock.mockResolvedValue({
+      status: 'completed',
+      output_text: JSON.stringify(createGeneratedQuiz(1))
+    })
+
+    saveOpenAiApiKeyToDatabase(connection, secureStorage, 'sk-test-first-key-1111')
+    await generateTemporaryQuizFromLessonTextFromDatabase(
+      connection,
+      {
+        lessonId: 'lesson-1',
+        settings: { questionCount: 1 }
+      },
+      secureStorage
+    )
+
+    saveOpenAiApiKeyToDatabase(connection, secureStorage, 'sk-test-second-key-2222')
+    await generateTemporaryQuizFromLessonTextFromDatabase(
+      connection,
+      {
+        lessonId: 'lesson-1',
+        settings: { questionCount: 1 }
+      },
+      secureStorage
+    )
+
+    expect(openAiConstructorMock.mock.calls.map(([options]) => options)).toEqual([
+      { apiKey: 'sk-test-first-key-1111' },
+      { apiKey: 'sk-test-second-key-2222' }
+    ])
+    expect(openAiCreateMock).toHaveBeenCalledTimes(2)
   })
 
   it('persists valid generated quiz data', async () => {
@@ -404,6 +491,15 @@ function countRows(tableName: string): number {
     { count: number } | undefined
 
   return row?.count ?? 0
+}
+
+function createFakeSecureStorage(): SecureStorageAdapter {
+  return {
+    isEncryptionAvailable: () => true,
+    encryptString: (plainText: string) => Buffer.from(`encrypted:${plainText}`, 'utf8'),
+    decryptString: (encryptedValue: Buffer) =>
+      encryptedValue.toString('utf8').replace(/^encrypted:/, '')
+  }
 }
 
 async function expectAppError(

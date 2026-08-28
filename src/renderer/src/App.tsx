@@ -1,7 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type JSX,
+  type KeyboardEvent
+} from 'react'
 import { isAppError, type AppErrorCode } from '../../shared/errors'
 import type { LessonRecord } from '../../shared/lessons'
 import type { QuizAttempt, QuizDifficulty, QuizRecord, QuizResult } from '../../shared/quizzes'
+import type { OpenAiApiKeyStatus } from '../../shared/settings'
 
 type FullQuiz = NonNullable<Awaited<ReturnType<Window['api']['getQuiz']>>>
 type QuizAnswerSubmission = Parameters<Window['api']['submitQuizAttempt']>[1][number]
@@ -64,6 +73,14 @@ function App(): JSX.Element {
   const [quizSortDirection, setQuizSortDirection] =
     useState<SortDirection>(defaultQuizSortDirection)
   const [isQuizSortMenuOpen, setIsQuizSortMenuOpen] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [openAiApiKeyStatus, setOpenAiApiKeyStatus] = useState<OpenAiApiKeyStatus | null>(null)
+  const [apiKeyDraft, setApiKeyDraft] = useState('')
+  const [isLoadingOpenAiApiKeyStatus, setIsLoadingOpenAiApiKeyStatus] = useState(false)
+  const [isSavingOpenAiApiKey, setIsSavingOpenAiApiKey] = useState(false)
+  const [isClearingOpenAiApiKey, setIsClearingOpenAiApiKey] = useState(false)
+  const [settingsStatusMessage, setSettingsStatusMessage] = useState<string | null>(null)
+  const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isImporting, setIsImporting] = useState(false)
   const [deletingLessonIds, setDeletingLessonIds] = useState<Set<string>>(() => new Set())
@@ -508,6 +525,90 @@ function App(): JSX.Element {
     if (event.key === 'Escape') {
       event.preventDefault()
       cancelTitleEdit()
+    }
+  }
+
+  const loadOpenAiApiKeyStatus = async (): Promise<void> => {
+    setIsLoadingOpenAiApiKeyStatus(true)
+    setSettingsErrorMessage(null)
+
+    try {
+      const status = await window.api.getOpenAiApiKeyStatus()
+      setOpenAiApiKeyStatus(status)
+    } catch (error) {
+      setSettingsErrorMessage(getErrorMessage(error))
+    } finally {
+      setIsLoadingOpenAiApiKeyStatus(false)
+    }
+  }
+
+  const openSettings = (): void => {
+    setIsSettingsOpen(true)
+    setApiKeyDraft('')
+    setSettingsStatusMessage(null)
+    setSettingsErrorMessage(null)
+    void loadOpenAiApiKeyStatus()
+  }
+
+  const closeSettings = (): void => {
+    setIsSettingsOpen(false)
+    setApiKeyDraft('')
+    setSettingsStatusMessage(null)
+    setSettingsErrorMessage(null)
+  }
+
+  const saveSettingsOpenAiApiKey = async (): Promise<void> => {
+    if (isSavingOpenAiApiKey || isClearingOpenAiApiKey) {
+      return
+    }
+
+    const trimmedApiKey = apiKeyDraft.trim()
+
+    if (trimmedApiKey.length === 0) {
+      setSettingsStatusMessage(null)
+      setSettingsErrorMessage('Enter an OpenAI API key.')
+      return
+    }
+
+    setIsSavingOpenAiApiKey(true)
+    setSettingsStatusMessage(null)
+    setSettingsErrorMessage(null)
+
+    try {
+      const result = await window.api.saveOpenAiApiKey(trimmedApiKey)
+      setOpenAiApiKeyStatus(result.status)
+      setApiKeyDraft('')
+      setSettingsStatusMessage('API key saved.')
+    } catch (error) {
+      setSettingsErrorMessage(getErrorMessage(error))
+    } finally {
+      setIsSavingOpenAiApiKey(false)
+    }
+  }
+
+  const submitSettingsOpenAiApiKey = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    void saveSettingsOpenAiApiKey()
+  }
+
+  const clearSettingsOpenAiApiKey = async (): Promise<void> => {
+    if (isSavingOpenAiApiKey || isClearingOpenAiApiKey) {
+      return
+    }
+
+    setIsClearingOpenAiApiKey(true)
+    setSettingsStatusMessage(null)
+    setSettingsErrorMessage(null)
+
+    try {
+      const result = await window.api.clearOpenAiApiKey()
+      setOpenAiApiKeyStatus(result.status)
+      setApiKeyDraft('')
+      setSettingsStatusMessage('Saved API key cleared.')
+    } catch (error) {
+      setSettingsErrorMessage(getErrorMessage(error))
+    } finally {
+      setIsClearingOpenAiApiKey(false)
     }
   }
 
@@ -1077,6 +1178,9 @@ function App(): JSX.Element {
                   </button>
                 </div>
               ) : null}
+              <button className="settings-button" type="button" onClick={openSettings}>
+                Settings
+              </button>
               <button
                 className="upload-button"
                 type="button"
@@ -1737,8 +1841,119 @@ function App(): JSX.Element {
           </section>
         )}
       </section>
+      {isSettingsOpen ? (
+        <div
+          className="settings-modal-backdrop"
+          role="presentation"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeSettings()
+            }
+          }}
+        >
+          <section
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-heading"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                closeSettings()
+              }
+            }}
+          >
+            <header className="settings-modal-header">
+              <div>
+                <h2 id="settings-heading">Settings</h2>
+                <p>{getOpenAiApiKeyStatusText(openAiApiKeyStatus, isLoadingOpenAiApiKeyStatus)}</p>
+              </div>
+              <button className="settings-close-button" type="button" onClick={closeSettings}>
+                Close
+              </button>
+            </header>
+
+            <form className="settings-form" onSubmit={submitSettingsOpenAiApiKey}>
+              <label className="settings-field" htmlFor="openai-api-key-input">
+                <span>OpenAI API key</span>
+                <input
+                  id="openai-api-key-input"
+                  className="settings-api-key-input"
+                  type="password"
+                  value={apiKeyDraft}
+                  onChange={(event) => {
+                    setApiKeyDraft(event.currentTarget.value)
+                    setSettingsErrorMessage(null)
+                    setSettingsStatusMessage(null)
+                  }}
+                  autoComplete="off"
+                  disabled={isSavingOpenAiApiKey || isClearingOpenAiApiKey}
+                />
+              </label>
+
+              {settingsErrorMessage !== null ? (
+                <p className="settings-message settings-message-error" role="alert">
+                  {settingsErrorMessage}
+                </p>
+              ) : null}
+
+              {settingsStatusMessage !== null ? (
+                <p className="settings-message" role="status">
+                  {settingsStatusMessage}
+                </p>
+              ) : null}
+
+              <div className="settings-actions">
+                <button
+                  className="upload-button settings-save-button"
+                  type="submit"
+                  disabled={isSavingOpenAiApiKey || isClearingOpenAiApiKey}
+                >
+                  {isSavingOpenAiApiKey ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  className="settings-secondary-button"
+                  type="button"
+                  onClick={() => {
+                    void clearSettingsOpenAiApiKey()
+                  }}
+                  disabled={
+                    openAiApiKeyStatus?.source !== 'saved' ||
+                    isSavingOpenAiApiKey ||
+                    isClearingOpenAiApiKey
+                  }
+                >
+                  {isClearingOpenAiApiKey ? 'Clearing...' : 'Clear saved key'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </main>
   )
+}
+
+function getOpenAiApiKeyStatusText(
+  status: OpenAiApiKeyStatus | null,
+  isLoadingStatus: boolean
+): string {
+  if (isLoadingStatus && status === null) {
+    return 'Loading API key status...'
+  }
+
+  if (status === null || !status.hasKey) {
+    return 'No API key saved'
+  }
+
+  if (status.source === 'saved') {
+    return `Using saved key ${status.maskedKey ?? ''}`.trim()
+  }
+
+  if (status.source === 'environment') {
+    return `Using environment key ${status.maskedKey ?? ''}`.trim()
+  }
+
+  return 'No API key saved'
 }
 
 function upsertLesson(lessons: LessonRecord[], lesson: LessonRecord): LessonRecord[] {

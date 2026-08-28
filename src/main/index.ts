@@ -14,6 +14,14 @@ import {
   type LessonRecord
 } from './lessons'
 import {
+  clearOpenAiApiKey,
+  getOpenAiApiKeyStatus,
+  saveOpenAiApiKey,
+  type ClearOpenAiApiKeyResult,
+  type OpenAiApiKeyStatus,
+  type SaveOpenAiApiKeyResult
+} from './settings'
+import {
   deleteQuiz,
   generateTemporaryQuizFromLessonText,
   listQuizAttemptsForLesson,
@@ -138,6 +146,30 @@ app.whenReady().then(() => {
       return deleteLesson(lessonId)
     } catch (error) {
       throw createIpcError(error, 'Unable to delete lesson.')
+    }
+  })
+
+  ipcMain.handle('settings:getOpenAiApiKeyStatus', (): OpenAiApiKeyStatus => {
+    try {
+      return getOpenAiApiKeyStatus()
+    } catch (error) {
+      throw createIpcError(error, 'Unable to load OpenAI API key settings.')
+    }
+  })
+
+  ipcMain.handle('settings:saveOpenAiApiKey', (_, apiKey: string): SaveOpenAiApiKeyResult => {
+    try {
+      return saveOpenAiApiKey(apiKey)
+    } catch (error) {
+      throw createIpcError(error, 'Unable to save OpenAI API key.')
+    }
+  })
+
+  ipcMain.handle('settings:clearOpenAiApiKey', (): ClearOpenAiApiKeyResult => {
+    try {
+      return clearOpenAiApiKey()
+    } catch (error) {
+      throw createIpcError(error, 'Unable to clear OpenAI API key.')
     }
   })
 

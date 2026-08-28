@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { LessonRecord } from '../../shared/lessons'
 import type { QuizAttempt, QuizRecord, QuizResult } from '../../shared/quizzes'
+import type { OpenAiApiKeyStatus } from '../../shared/settings'
 import App from './App'
 
 type AppAPI = Window['api']
@@ -201,12 +202,98 @@ describe('App quiz sorting', () => {
   })
 })
 
+describe('App settings', () => {
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it('opens the Settings modal from the Lessons header', async () => {
+    const api = createApi({
+      getOpenAiApiKeyStatus: vi.fn(async () => createOpenAiApiKeyStatus())
+    })
+    setWindowApi(api)
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeTruthy()
+    expect(await screen.findByText('No API key saved')).toBeTruthy()
+    expect(api.getOpenAiApiKeyStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('saves a key, clears the input, and renders only the masked saved-key status', async () => {
+    const rawApiKey = 'sk-test-secret-key-1234'
+    const api = createApi({
+      getOpenAiApiKeyStatus: vi.fn(async () => createOpenAiApiKeyStatus()),
+      saveOpenAiApiKey: vi.fn(async () => ({
+        status: createOpenAiApiKeyStatus({
+          hasKey: true,
+          source: 'saved',
+          maskedKey: 'sk-...1234',
+          updatedAt: timestamp
+        })
+      }))
+    })
+    setWindowApi(api)
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    await screen.findByText('No API key saved')
+    fireEvent.change(screen.getByLabelText('OpenAI API key'), {
+      target: { value: rawApiKey }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(api.saveOpenAiApiKey).toHaveBeenCalledWith(rawApiKey)
+    })
+    expect((screen.getByLabelText('OpenAI API key') as HTMLInputElement).value).toBe('')
+    expect(await screen.findByText('Using saved key sk-...1234')).toBeTruthy()
+    expect(screen.queryByText(rawApiKey)).toBeNull()
+    expect(screen.queryByDisplayValue(rawApiKey)).toBeNull()
+  })
+
+  it('clears a saved key and updates the Settings status', async () => {
+    const api = createApi({
+      getOpenAiApiKeyStatus: vi.fn(async () =>
+        createOpenAiApiKeyStatus({
+          hasKey: true,
+          source: 'saved',
+          maskedKey: 'sk-...1234',
+          updatedAt: timestamp
+        })
+      ),
+      clearOpenAiApiKey: vi.fn(async () => ({
+        status: createOpenAiApiKeyStatus()
+      }))
+    })
+    setWindowApi(api)
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByText('Using saved key sk-...1234')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear saved key' }))
+
+    await waitFor(() => {
+      expect(api.clearOpenAiApiKey).toHaveBeenCalledTimes(1)
+    })
+    expect(await screen.findByText('No API key saved')).toBeTruthy()
+  })
+})
+
 function createApi(overrides: Partial<AppAPI> = {}): AppAPI {
   return {
     importLessonPdf: vi.fn(async () => null),
     listLessons: vi.fn(async () => []),
     updateLessonTitle: vi.fn(),
     deleteLesson: vi.fn(),
+    getOpenAiApiKeyStatus: vi.fn(async () => createOpenAiApiKeyStatus()),
+    saveOpenAiApiKey: vi.fn(),
+    clearOpenAiApiKey: vi.fn(),
     createQuiz: vi.fn(),
     listQuizzesForLesson: vi.fn(async () => []),
     updateQuizTitle: vi.fn(),
@@ -245,6 +332,16 @@ function getRenderedQuizTitles(): string[] {
   return Array.from(document.querySelectorAll('.quiz-title')).map(
     (element) => element.textContent ?? ''
   )
+}
+
+function createOpenAiApiKeyStatus(overrides: Partial<OpenAiApiKeyStatus> = {}): OpenAiApiKeyStatus {
+  return {
+    hasKey: false,
+    source: null,
+    maskedKey: null,
+    updatedAt: null,
+    ...overrides
+  }
 }
 
 function createLesson(overrides: Partial<LessonRecord> = {}): LessonRecord {

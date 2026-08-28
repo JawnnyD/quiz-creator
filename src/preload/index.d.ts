@@ -7,6 +7,11 @@ import type {
   QuizRecord,
   QuizResult
 } from '../shared/quizzes'
+import type {
+  ClearOpenAiApiKeyResult,
+  OpenAiApiKeyStatus,
+  SaveOpenAiApiKeyResult
+} from '../shared/settings'
 
 export interface FullQuiz {
   quiz: QuizRecord
@@ -29,6 +34,9 @@ export interface AppAPI {
   listLessons: () => Promise<LessonRecord[]>
   updateLessonTitle: (id: string, title: string) => Promise<LessonRecord>
   deleteLesson: (id: string) => Promise<DeleteLessonResult>
+  getOpenAiApiKeyStatus: () => Promise<OpenAiApiKeyStatus>
+  saveOpenAiApiKey: (apiKey: string) => Promise<SaveOpenAiApiKeyResult>
+  clearOpenAiApiKey: () => Promise<ClearOpenAiApiKeyResult>
   createQuiz: (input: GenerateTemporaryQuizInput) => Promise<FullQuiz>
   listQuizzesForLesson: (lessonId: string) => Promise<QuizRecord[]>
   updateQuizTitle: (id: string, title: string) => Promise<QuizRecord>
