@@ -6,6 +6,11 @@ on:
 jobs:
   build-mac:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        arch:
+          - arm64
+          - x64
 
     steps:
       - uses: actions/checkout@v4
@@ -20,9 +25,9 @@ jobs:
 
       - run: npm run build
 
-      - run: npx electron-builder --mac --universal
+      - run: npx electron-builder --mac --${{ matrix.arch }} --publish never
 
       - uses: actions/upload-artifact@v4
         with:
-          name: quiz-creator-mac
+          name: quiz-creator-mac-${{ matrix.arch }}
           path: dist/*
