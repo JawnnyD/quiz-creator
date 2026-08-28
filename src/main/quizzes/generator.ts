@@ -317,25 +317,49 @@ The goal is to help the learner confirm that they understand the core material b
 
 const nbmePrompt = `Difficulty: NBME
 
-Create USMLE Step 1-style questions modeled after NBME-style clinical reasoning.
+Create USMLE Step 1-style questions that use NBME-style clinical reasoning. Do not search or reference the internet while generating questions. Use the local style guidelines below.
+
+NBME/USMLE-style guidelines:
+- Prefer a single patient-centered vignette followed by one clear lead-in question and 5 answer choices.
+- The question must have one best answer; distractors may be partially plausible but must be less correct than the best answer.
+- Most questions should require application of foundational science concepts rather than direct recall.
+- The learner should usually need to identify the diagnosis, mechanism, pathway, organism, drug effect, pathology, physiology, or risk factor from the vignette before selecting the answer.
+- Emphasize Step 1 reasoning: mechanisms underlying health, disease, and modes of therapy.
+- Use integrated basic science reasoning across pathology, physiology, pharmacology, microbiology, immunology, biochemistry, genetics, anatomy, embryology, histology, behavioral science, epidemiology, or ethics when supported by the document.
 
 Question style:
 - Use full clinical vignette stems when appropriate.
-- Include patient demographics, relevant history, physical exam findings, labs, imaging, pathology, or experimental findings when useful.
-- Require application, integration, or multi-step reasoning rather than direct recall.
-- Focus on mechanisms, diagnosis, pathophysiology, pharmacology, microbiology, immunology, biochemistry, genetics, physiology, pathology, or behavioral science as supported by the document.
-- The correct answer should be the best answer, not merely a true statement.
+- Include patient age, sex, relevant history, symptom timing, physical exam findings, vital signs, labs, imaging, pathology, experimental findings, or family/social history only when they help solve the question.
+- Keep stems focused; every included detail should support the correct answer, distinguish it from distractors, or establish clinically realistic context.
+- Avoid long vignettes that add noise without improving reasoning.
+- Avoid simple "What is the diagnosis?" questions when the same concept can be tested through mechanism, pathophysiology, consequence, associated finding, drug mechanism, adverse effect, or expected lab change.
+- Avoid first-order recall unless the document content cannot reasonably support a clinical reasoning question.
+- Avoid trick wording, "except" questions, vague lead-ins, and answer choices that are true but do not answer the question.
+
+Lead-in style:
+- Use clear lead-ins such as:
+  - "Which of the following best explains this patient's findings?"
+  - "Which of the following is the most likely underlying mechanism?"
+  - "Which of the following additional findings would most likely be present?"
+  - "A defect in which of the following processes is most likely responsible?"
+  - "Which of the following best describes the effect of this drug?"
+  - "Which of the following organisms is the most likely cause?"
+- The lead-in should be answerable without looking at the choices whenever possible.
 
 Distractors:
-- Must be medically plausible.
-- Should reflect common diagnostic confusions, mechanism errors, similar diseases, similar drugs, or related pathways.
-- Avoid obviously wrong or throwaway options.
+- Make distractors medically plausible and educationally useful.
+- Distractors should come from similar diseases, similar mechanisms, similar drugs, related organisms, nearby pathways, common misconceptions, or clinically tempting alternatives.
+- Keep answer choices homogeneous in category, length, specificity, and grammar.
+- Avoid obviously unrelated choices, joke answers, and choices that are much more detailed than the others.
+- Vary the position of the correct answer across questions and avoid predictable answer patterns.
 
 Question quality requirements:
-- Do not make the vignette longer than necessary.
-- Include only details that help discriminate the correct answer from distractors.
+- Use the uploaded document as the primary factual source.
+- Prioritize the document's learning objectives and high-yield concepts.
 - Avoid copying wording directly from the source document when possible.
-- Maintain balanced coverage across the document, with emphasis on learning objectives and high-yield concepts.`
+- Maintain balanced coverage across the requested content unless the user asks to focus on a specific section.
+- Make the correct answer the best answer, not merely a true statement.
+- Ensure each explanation briefly states why the correct answer is best and why the main distractors are wrong.`
 
 function buildCustomPrompt(customDifficultyInstructions: string): string {
   const instructions =
